@@ -86,7 +86,7 @@ export function Workspace({ project }: { project: Project }) {
         <footer className="workspace-bottomline"><span>FROM CONTEXT TO CINEMA.</span><span>每一个想法，都值得一帧。</span></footer>
       </main>}
 
-      {page === "assets" && <AssetLibrary assetSearch={assetSearch} assetType={assetType} onGenerate={(asset) => navigate(`${base}/generation`, { state: { referenceAsset: asset } })} setAssetSearch={setAssetSearch} setAssetType={setAssetType} setView={setView} view={view} />}
+      {page === "assets" && <AssetLibrary projectId={project.id} assetSearch={assetSearch} assetType={assetType} onGenerate={(asset) => navigate(`${base}/generation`, { state: { referenceAsset: asset } })} setAssetSearch={setAssetSearch} setAssetType={setAssetType} setView={setView} view={view} />}
 
       {page === "generation" && <GenerationPage onClearReference={() => navigate(`${base}/generation`, { replace: true, state: null })} projectId={project.id} generationType={generationType} referenceAsset={referenceAsset} setGenerationType={setGenerationType} prompt={generationPrompt} setPrompt={setGenerationPrompt} />}
       {page === "profile" && <ProfilePage projectId={project.id} />}

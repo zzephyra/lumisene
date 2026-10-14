@@ -4,6 +4,8 @@
 
 Accepted — 2026-09-27。用户已确认。
 
+[ADR-028](028-restore-disabled-model-configs.md) 修正下文「只能停用」：已发布内容仍然不可改，`enabled` 可以重新打开。停用时清除的业务指定不会随恢复自动回来。
+
 ## Context
 
 [ADR-008](008-model-gateway-langchain-boundary.md) 规定模型调用只经过 Model Gateway。`model_configs` 是全局配置，不是项目资源。密钥明文只在服务端，接口不得返回。版本不可改写，只能停用。见 [数据与事务](../specs/data-and-transactions.md)。

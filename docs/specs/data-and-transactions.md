@@ -30,11 +30,13 @@
 | memory.memory_revisions | project_id、memory_id、revision_number、content、source_type(manual/message/document)、source_id?、source_version?、confirmed_by、confirmed_at、status(active/superseded/deleted)；UNIQUE(memory_id,revision_number)，每记忆最多一个 active |
 | generation.generation_tasks | project_id、actor_id、kind(image/video)、status、model_config_id、config_version、idempotency_key、request_hash、request_snapshot、provider_task_id?、provider、reconciliation_required、phase、progress?、next_poll_at?、error?、lease字段、started_at?、finished_at?。图片使用 queued/running/succeeded/failed/canceled。视频额外使用 submitting 与 cancel_requested；提交结果不明时保持 submitting 并标记 reconciliation_required，不得重发。UNIQUE(project_id,actor_id,idempotency_key) |
 | generation.generation_attempts | project_id、task_id、attempt_number、operation(submit/poll/cancel/store)、provider_request_key、outcome、error_type?、usage?、started_at、finished_at?；UNIQUE(task_id,attempt_number) |
-| assets.assets | project_id、kind(IMAGE/VIDEO/AUDIO/FILE)、object_key UNIQUE、sha256?、mime、size_bytes?、width?、height?、duration_ms?、status(uploading/ready/failed/deleted)、created_by、upload_expires_at?、deleted_at? |
+| assets.assets | project_id、kind(IMAGE/VIDEO/AUDIO/FILE)、object_key UNIQUE、sha256、mime、size_bytes、width?、height?、duration_ms?、status(uploading/ready/failed/deleted)、storage_provider(s3/qiniu)、bucket、created_by、deleted_at?、deleted_by?、purge_status?(pending/failed/purged) |
+| assets.asset_purge_jobs | 一个资产一条清理任务。保存创建时的 deletion_policy 与 settings_revision。status 为 pending、failed、purged |
+| infrastructure.settings.system_settings | namespace + key 唯一，value JSONB，schema_version，revision，updated_at，updated_by。本地默认文件只补缺失键 |
 | generation.generation_outputs | project_id、task_id、asset_id、ordinal；UNIQUE(task_id,ordinal)，成功任务至少有一个 ready 输出 |
-| infrastructure.ai.model_configs | provider、model_name、capability、config_version、parameters_schema、limits、secret_ref、enabled；UNIQUE(provider,model_name,capability,config_version)，版本不可改写，只能停用。capability 为 text_generation、embedding、text_to_video、image_to_video、text_to_image、speech_synthesis、speech_recognition。列表有上限 |
-| infrastructure.ai.model_assignments | capability 主键、model_config_id、config_version、updated_by、updated_at。每项能力最多一个已启用且能力相同的模型。停用该配置时同一事务清除 |
-| infrastructure.ai.model_config_audits | actor_id、model_config_id、config_version、action(created/disabled/assigned/unassigned)、created_at；与配置变更同一事务，不记录密钥或 secret_ref |
+| infrastructure.ai.model_configs | provider、model_name、capability、config_version、parameters_schema、limits、secret_ref、enabled；UNIQUE(provider,model_name,capability,config_version)，已发布内容不可改写，enabled 可以重新打开。capability 为 text_generation、embedding、text_to_video、image_to_video、text_to_image、speech_synthesis、speech_recognition。列表有上限 |
+| infrastructure.ai.model_assignments | capability 主键、model_config_id、config_version、updated_by、updated_at。每项能力最多一个已启用且能力相同的模型。停用该配置时同一事务清除；恢复配置不会自动写回 |
+| infrastructure.ai.model_config_audits | actor_id、model_config_id、config_version、action(created/disabled/enabled/assigned/unassigned)、created_at；与配置变更同一事务，不记录密钥或 secret_ref |
 | infrastructure.ai.text_completions | project_id、actor_id、model_config_id、config_version、prompt(1–10000)、status(queued/running/succeeded/failed/canceled)、content?、error_code?、error_message?。一次显式文本调用，不是对话消息。供应商调用不得包在写入事务内 |
 | infrastructure.outbox.outbox_events | event_id、project_id?、aggregate_type、aggregate_id、aggregate_version、event_type、schema_version、payload、created_at；事件事实不可变 |
 | infrastructure.outbox.event_deliveries | event_id、consumer、target_generation、status、attempt_count、next_attempt_at、lease字段、last_error?、completed_at?；UNIQUE(event_id,consumer,target_generation) |
@@ -95,3 +97,5 @@ editor_admin_audits 与导出取消状态在同一事务提交。取消通过与
 `generation_inputs` 归 generation 所有，记录项目、创建人、图片/蒙版私有对象键、SHA256、尺寸及上传状态。独立于作品 Asset。先提交 uploading 登记，事务外写对象，再提交 ready；失败登记保留供重试/回收。请求失败不会留下无归属的新对象键。任务增加可空 input_id，与 project_id 建立复合外键；旧任务为空。任务快照保存 operation，模型配置版本与内容摘要进入已有不可变任务/幂等契约。图片重绘合成阶段保留蒙版外原图像素，结果另存资产。
 
 输入读取/绑定与回收使用行锁。回收先确认无任务引用，再标记 deleted 并提交；新任务只允许 ready 输入，防止提交后回收其依赖。所有任务引用（包括终态）都阻止回收。
+
+创作技能运行绑定：creative_skills.runtime_key 与 creative_skill_revisions.runtime_key 归现有 AI 目录。迁移 0017 增加未删除 runtime_key 非空的唯一部分索引；不存在关联时使用 Git 默认，不强制初始化技能行。任务快照在既有 GenerationTask 提交事务中固化，Worker 不跨模块读技能表。

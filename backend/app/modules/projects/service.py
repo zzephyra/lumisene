@@ -132,6 +132,10 @@ class ProjectService:
         project, member = existing
         return _project_view(project, member.role)
 
+    async def visible_project_ids(self, uow: UnitOfWork, actor_id: UUID) -> list[UUID]:
+        """Scope opt-in public works to projects the author still belongs to."""
+        return await self.repository.visible_project_ids(uow.session, actor_id)
+
     async def list_projects(
         self,
         uow: UnitOfWork,

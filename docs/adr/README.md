@@ -33,3 +33,19 @@
 | [026](026-image-inpaint-and-image-to-video.md) | 图片局部重绘与图生视频 | Accepted |
 
 | [027](027-unified-media-models.md) | 按媒体类型统一模型指定 | Accepted |
+| [028](028-restore-disabled-model-configs.md) | 停用的模型配置可以恢复 | Accepted |
+| [029](029-model-endpoints-yaml.md) | 模型密钥用 YAML 文件配置 | Accepted |
+| [030](030-provider-catalog-yaml.md) | 供应商目录写在模型端点 YAML | Accepted |
+| [031](031-wan3-first-frame.md) | wan3.0-video 用首帧媒体生成视频 | Accepted |
+
+| [032](032-admin-skills.md) | 创作技能目录管理 | Accepted |
+| [033](033-skill-execution-layer.md) | 统一 Skill 执行层与扩图迁移 | Accepted |
+
+- [034：结构化扩图流水线](034-structured-outpainting.md)
+
+- [035：专用原生扩图模型](035-native-outpainting.md)（取代 034）
+
+| [036](036-qiniu-generated-assets.md) | 生成作品写入七牛，删除策略做成系统设置 | Accepted |
+- [037：统一万相图像编辑模型](037-unified-image-editing.md)
+
+- [038 — 公开作品与个人主页](038-public-works.md)

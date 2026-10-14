@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "settings": {
+    "assets": {
+      "deletion_policy": "retain_cloud_file"
+    }
+  }
+}

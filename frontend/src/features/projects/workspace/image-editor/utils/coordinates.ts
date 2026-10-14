@@ -7,7 +7,7 @@ export const VIEW_PAD = { left: 28, right: 28, top: 20, bottom: 84 };
 export function contentSize(view: ViewTransform): { width: number; height: number } {
   return {
     width: Math.max(1, view.stageWidth - VIEW_PAD.left - VIEW_PAD.right),
-    height: Math.max(1, view.stageHeight - VIEW_PAD.top - VIEW_PAD.bottom),
+    height: Math.max(1, view.stageHeight - VIEW_PAD.top - (view.padBottom ?? VIEW_PAD.bottom)),
   };
 }
 

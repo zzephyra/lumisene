@@ -110,7 +110,7 @@ def test_inpaint_and_video_complete_with_project_scoped_results(image_api):  # n
     client, settings, storage = image_api
     project = setup(client, settings)
     options = client.get(f"/api/v1/projects/{project}/image-editor-options").json()
-    assert all(item["available"] for item in options)
+    assert all(item["available"] for item in options if item["capability"] != "image_outpaint")
     mask = Image.new("L", (256, 256), 0)
     mask.paste(255, (0, 0, 128, 256))
     stream = BytesIO()
@@ -194,7 +194,7 @@ def test_input_permissions_validation_and_wrong_operation(image_api):  # noqa: F
         "/api/v1/projects", json={"name": "Other"}, headers=_mutation_headers(client, settings)
     ).json()["id"]
     assert submit(client, settings, other, input_id, "video").status_code == 404
-    assert submit(client, settings, project, input_id, "image").status_code == 422
+    assert submit(client, settings, other, input_id, "image").status_code == 404
     invalid = client.post(
         f"/api/v1/projects/{project}/generation-inputs",
         json={"id": str(uuid4()), "image_base64": "not-an-image"},
@@ -265,7 +265,8 @@ def test_openai_adapter_sends_transparent_edit_mask(monkeypatch):
             part.get_param("name", header="content-disposition"): part.get_payload(decode=True)
             for part in message.iter_parts()
         }
-        assert parts["prompt"] == b"change"
+        assert b"change" in parts["prompt"]
+        assert "根据用户要求修改指定区域".encode() in parts["prompt"]
         mask = Image.open(BytesIO(parts["mask"]))
         assert mask.getpixel((0, 0))[3] == 0
         return 200, {"data": [{"b64_json": b64(picture())}]}
@@ -308,14 +309,82 @@ def test_dashscope_first_frame_payload_and_unknown_submission():
         )
 
 
-def test_qwen_edit_uses_same_image_model_with_image_references():
+def test_wan3_first_frame_uses_media_reference():
+    from app.infrastructure.ai.adapters.dashscope_video import DashScopeVideo
+
+    def post(url, key, payload, headers, timeout):
+        assert url.endswith("/video-generation/video-synthesis")
+        assert headers["X-DashScope-Async"] == "enable"
+        assert payload["model"] == "wan3.0-video"
+        assert "img_url" not in payload["input"]
+        assert payload["input"]["media"] == [
+            {"type": "first_frame", "url": "data:image/png;base64," + b64(picture())}
+        ]
+        assert payload["parameters"] == {
+            "duration": 5,
+            "resolution": "720P",
+            "ratio": "adaptive",
+        }
+        return 200, {"output": {"task_id": "task-wan3", "task_status": "PENDING"}}
+
+    task_id = asyncio.run(
+        DashScopeVideo(post=post).submit(
+            base_url="https://example.test/api/v1",
+            api_key="test",
+            model="wan3.0-video",
+            prompt="motion",
+            duration=5,
+            size=None,
+            image=picture(),
+            resolution="720P",
+        )
+    )
+    assert task_id == "task-wan3"
+
+
+def test_qwen_image_2_edit_uses_native_multimodal_references():
+    from app.infrastructure.ai.adapters.openai_images import OpenAICompatibleImages
+
+    def post(url, key, payload, timeout):
+        assert url == ("https://example.test/api/v1/services/aigc/multimodal-generation/generation")
+        assert payload["model"] == "qwen-image-2.0"
+        content = payload["input"]["messages"][0]["content"]
+        images = [item["image"] for item in content if "image" in item]
+        assert len(images) == 3
+        assert images[0] == "data:image/png;base64," + b64(picture())
+        assert images[1] == "data:image/png;base64," + b64(picture("white"))
+        assert payload["parameters"]["size"] == "512*512"
+        assert payload["parameters"]["n"] == 1
+        assert "第二张是选区参考" in content[-1]["text"]
+        return 200, {
+            "output": {
+                "choices": [{"message": {"content": [{"image": "https://example.test/out.png"}]}}]
+            }
+        }
+
+    def fetch(url, timeout):
+        assert url == "https://example.test/out.png"
+        return picture("blue"), "image/png"
+
+    result = asyncio.run(
+        OpenAICompatibleImages(post=post, fetch=fetch).edit(
+            base_url="https://example.test/compatible-mode/v1",
+            api_key="test",
+            model="qwen-image-2.0",
+            prompt="blue",
+            image=picture(),
+            mask=picture("white"),
+        )
+    )
+    assert result[0][0] == picture("blue")
+def test_qwen_image_3_edit_uses_compatible_image_references():
     from app.infrastructure.ai.adapters.openai_images import OpenAICompatibleImages
 
     def post(url, key, payload, timeout):
         assert url.endswith("/images/generations")
         assert payload["model"] == "qwen-image-3.0"
         assert "mask" not in payload
-        assert len(payload["image"]) == 2
+        assert len(payload["image"]) == 3
         assert payload["image"][0] == "data:image/png;base64," + b64(picture())
         assert payload["image"][1] == "data:image/png;base64," + b64(picture("white"))
         assert payload["size"] == "512x512"
@@ -333,6 +402,15 @@ def test_qwen_edit_uses_same_image_model_with_image_references():
         )
     )
     assert result[0][0] == picture("blue")
+def test_qwen_native_size_aligns_edges_and_keeps_area_in_range():
+    from app.infrastructure.ai.adapters.openai_images import _qwen_native_size
+
+    assert _qwen_native_size(256, 256) == "512*512"
+    sized = _qwen_native_size(2048, 1144)
+    width, height = (int(part) for part in sized.split("*"))
+    assert width % 16 == 0 and height % 16 == 0
+    assert 512 * 512 <= width * height <= 2048 * 2048
+    assert sized == "2048*1152"
 
 
 def test_no_separate_media_assignment_and_qwen_is_available(image_api):  # noqa: F811
@@ -391,6 +469,203 @@ def test_large_inpaint_preserves_original_and_bounds_provider_copy():
     result = _composite_edits(saved, saved_mask, [(reference, "image/png")])[0][0]
     output = Image.open(BytesIO(result))
     assert output.size == original.size
-    assert output.crop((900, 0, 1800, 1800)).convert("RGB").tobytes() == original.crop(
-        (900, 0, 1800, 1800)
-    ).tobytes()
+    assert (
+        output.crop((900, 0, 1800, 1800)).convert("RGB").tobytes()
+        == original.crop((900, 0, 1800, 1800)).tobytes()
+    )
+
+
+def _png(image: Image.Image) -> bytes:
+    stream = BytesIO()
+    image.save(stream, "PNG")
+    return stream.getvalue()
+
+
+def test_context_crop_tracks_the_selection_and_stays_inside_the_image():
+    from app.infrastructure.ai.adapters.openai_images import _edit_references, context_box
+
+    assert context_box(200, 200, (0, 0, 40, 40))[:2] == (0, 0)
+    image = Image.new("RGBA", (400, 300), (0, 0, 255, 128))
+    mask = Image.new("L", image.size, 0)
+    mask.paste(255, (180, 130, 220, 170))
+    reference, selection = _edit_references(_png(image), _png(mask))
+    opened = Image.open(BytesIO(reference))
+    region = Image.open(BytesIO(selection)).convert("L")
+    assert opened.size == region.size
+    assert opened.size[0] < image.width and opened.size[1] < image.height
+    assert region.getbbox() is not None
+    assert region.getextrema()[1] == 255
+    wide = Image.new("RGB", (800, 40), "green")
+    narrow = Image.new("L", wide.size, 0)
+    narrow.paste(255, (390, 10, 410, 30))
+    prepared, _ = _edit_references(_png(wide), _png(narrow))
+    width, height = Image.open(BytesIO(prepared)).size
+    assert 1 / 8 <= width / height <= 8
+
+
+def test_composite_changes_only_the_selection_and_feathers_inward():
+    from app.modules.generation.service import _composite_edits
+
+    source = Image.new("RGBA", (200, 160), (10, 20, 30, 255))
+    source.putpixel((0, 0), (1, 2, 3, 0))
+    source.putpixel((79, 80), (9, 8, 7, 200))
+    mask = Image.new("L", source.size, 0)
+    mask.paste(255, (80, 60, 120, 100))
+    edited = Image.new("RGBA", (20, 20), (255, 0, 0, 255))
+    composed = _composite_edits(_png(source), _png(mask), [(_png(edited), "image/png")])
+    output = Image.open(BytesIO(composed[0][0]))
+    assert output.size == source.size
+    assert output.getpixel((0, 0)) == (1, 2, 3, 0)
+    assert output.getpixel((79, 80)) == (9, 8, 7, 200)
+    assert output.getpixel((100, 80)) == (255, 0, 0, 255)
+    edge = output.getpixel((80, 80))
+    assert edge != source.getpixel((80, 80))
+    assert edge != (255, 0, 0, 255)
+    for y in range(source.height):
+        for x in range(source.width):
+            if not (80 <= x < 120 and 60 <= y < 100):
+                assert output.getpixel((x, y)) == source.getpixel((x, y))
+    tiny = Image.new("L", source.size, 0)
+    tiny.paste(255, (100, 80, 104, 84))
+    tiny_output = Image.open(
+        BytesIO(_composite_edits(_png(source), _png(tiny), [(_png(edited), "image/png")])[0][0])
+    )
+    assert tiny_output.getpixel((0, 0)) == (1, 2, 3, 0)
+    assert tiny_output.getpixel((99, 79)) == source.getpixel((99, 79))
+    assert tiny_output.getpixel((101, 81)) != source.getpixel((101, 81))
+    with pytest.raises(ValidationError, match="无法解码"):
+        _composite_edits(_png(source), _png(mask), [(b"not-an-image", "image/png")])
+    with pytest.raises(ValidationError, match="请先框选"):
+        empty = _png(Image.new("L", source.size, 0))
+        _composite_edits(_png(source), empty, [(_png(edited), "image/png")])
+
+
+def test_qwen_rejects_extreme_aspect_without_calling_the_provider():
+    from app.core.errors import ProviderError
+    from app.infrastructure.ai.adapters.openai_images import (
+        OpenAICompatibleImages,
+        edit_instructions,
+    )
+
+    instructions = edit_instructions("移除这里的人物", referenced=True)
+    assert "第二张是选区参考" in instructions
+    assert "根据周围可见场景合理补全被遮挡背景" in instructions
+    called = False
+
+    def post(url, key, payload, timeout):
+        nonlocal called
+        called = True
+        return 200, {"data": [{"b64_json": b64(picture())}]}
+
+    with pytest.raises(ProviderError, match="1:8"):
+        asyncio.run(
+            OpenAICompatibleImages(post=post).edit(
+                base_url="https://example.test/v1",
+                api_key="test",
+                model="qwen-image-3.0",
+                prompt="移除这里的人物",
+                image=picture("red", (800, 40)),
+                mask=picture("white", (800, 40)),
+            )
+        )
+    assert called is False
+
+
+def test_unchanged_inpaint_is_not_reported_as_success():
+    from app.modules.generation.service import _composite_edits
+
+    source = Image.new("RGB", (256, 256), "red")
+    mask = Image.new("L", source.size, 255)
+    with pytest.raises(ValidationError, match="没有变化"):
+        _composite_edits(_png(source), _png(mask), [(_png(source), "image/png")])
+
+
+def test_reference_image_uses_unified_image_model_without_mask(image_api):  # noqa: F811
+    client, settings, storage = image_api
+    project = setup(client, settings)
+    input_id = upload(client, settings, project)
+    queued = submit(client, settings, project, input_id, "image")
+    assert queued.status_code == 202, queued.text
+    assert submit(client, settings, project, input_id, "image").json()["id"] == queued.json()["id"]
+
+    class ReferenceImages:
+        async def reference(self, **kwargs):
+            assert kwargs["model"] == "gpt-image-1"
+            assert kwargs["image"] == picture()
+            assert "mask" not in kwargs
+            return [(picture("blue"), "image/png")]
+
+    async def run():
+        engine = create_db_engine(settings)
+        try:
+            await ImageGenerationService(
+                settings, create_session_factory(engine), ReferenceImages(), storage
+            ).execute(UUID(queued.json()["id"]))
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+    result = client.get(f"/api/v1/projects/{project}/generation-tasks/{queued.json()['id']}").json()
+    assert result["status"] == "succeeded", result
+    assert len(result["output_asset_ids"]) == 1
+
+
+@pytest.mark.parametrize("model", ["qwen-image-2.0", "qwen-image-3.0"])
+def test_reference_adapter_sends_only_original_and_user_prompt(model):
+    from app.infrastructure.ai.adapters.openai_images import OpenAICompatibleImages
+
+    def post(url, key, payload, timeout):
+        if model == "qwen-image-2.0":
+            content = payload["input"]["messages"][0]["content"]
+            assert len([part for part in content if "image" in part]) == 1
+            assert {"text": "watercolor"} in content
+            return 200, {
+                "output": {
+                    "choices": [
+                        {"message": {"content": [{"image": "https://example.test/out.png"}]}}
+                    ]
+                }
+            }
+        else:
+            assert len(payload["image"]) == 1
+            assert payload["prompt"] == "watercolor"
+        return 200, {"data": [{"b64_json": b64(picture("blue"))}]}
+
+    result = asyncio.run(
+        OpenAICompatibleImages(
+            post=post, fetch=lambda *_: (picture("blue"), "image/png")
+        ).reference(
+            base_url="https://example.com/compatible-mode/v1",
+            api_key="test",
+            model=model,
+            prompt="watercolor",
+            image=picture(),
+            size="1024x1024",
+        )
+    )
+    assert result
+
+
+def test_openai_reference_has_no_selection_mask(monkeypatch):
+    from app.infrastructure.ai.adapters import openai_images
+
+    def post(url, key, data, boundary):
+        assert url.endswith("/images/edits")
+        assert b'name="image"' in data
+        assert b'name="mask"' not in data
+        assert b"watercolor" in data
+        assert b"1024x1024" in data
+        return 200, {"data": [{"b64_json": b64(picture("blue"))}]}
+
+    monkeypatch.setattr(openai_images, "_post_multipart", post)
+    result = asyncio.run(
+        openai_images.OpenAICompatibleImages().reference(
+            base_url="https://example.test/v1",
+            api_key="test",
+            model="gpt-image-1",
+            prompt="watercolor",
+            image=picture(),
+            size="1024x1024",
+        )
+    )
+    assert result[0][0] == picture("blue")

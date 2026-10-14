@@ -1,30 +1,38 @@
+import { resizeOutpaint, type OutpaintEdge } from "./utils/outpaint";
 import type Konva from "konva";
 import { useEffect, useRef, useState } from "react";
-import { Group, Image as KonvaImage, Layer, Stage } from "react-konva";
+import { Group, Image as KonvaImage, Layer, Rect, Stage } from "react-konva";
 
 import { BrushCursor } from "./brush-cursor";
 import { CropTool } from "./crop-tool";
 import { useMask } from "./hooks/use-mask";
 import { MaskLayer } from "./mask-layer";
 import { OutpaintBackdrop, OutpaintHandles } from "./outpaint-tool";
-import type { EditorDocument, EditorTool, MaskMode, OutpaintFrame, Stroke, ViewTransform } from "./types";
+import type { CropRect, EditorDocument, EditorTool, MaskMode, OutpaintFrame, Stroke, ViewTransform } from "./types";
 import { displayScale, fixedCropFrame, imageToScreen, screenToImage } from "./utils/coordinates";
-import { outpaintGesture } from "./utils/hits";
+import { cropGesture, outpaintGesture } from "./utils/hits";
+import { clampSelection, moveSelection, resizeSelection } from "./utils/selection";
 
 type Drag =
   | { kind: "pan"; x: number; y: number }
   | { kind: "paint" }
-  | { kind: "outpaint-image"; x: number; y: number; frame: OutpaintFrame }
-  | { kind: "outpaint-edge"; edge: "n" | "s" | "e" | "w"; x: number; y: number; frame: OutpaintFrame };
+  | { kind: "select-new"; origin: { x: number; y: number } }
+  | { kind: "select-move"; x: number; y: number; rect: CropRect }
+  | { kind: "select-resize"; handle: string; x: number; y: number; rect: CropRect }
+  | { kind: "outpaint-edge"; edge: OutpaintEdge; x: number; y: number; frame: OutpaintFrame };
 
 export function EditorCanvas({
   documentState,
+  locked = false,
   view,
   tool,
   maskMode,
   brushSize,
   cropRatio,
   outpaint,
+  selection,
+  selectionMode,
+  onSelection,
   onStroke,
   onPan,
   onZoom,
@@ -33,34 +41,49 @@ export function EditorCanvas({
   onResetView,
 }: {
   documentState: EditorDocument;
+  locked?: boolean;
   view: ViewTransform;
   tool: EditorTool;
   maskMode: MaskMode;
   brushSize: number;
   cropRatio: number | null;
   outpaint: OutpaintFrame | null;
+  selection: CropRect | null;
+  selectionMode: "box" | "brush";
+  onSelection: (rect: CropRect | null) => void;
   onStroke: (stroke: Stroke) => void;
   onPan: (dx: number, dy: number) => void;
   onZoom: (factor: number, x: number, y: number) => void;
-  onOutpaint: (frame: OutpaintFrame) => void;
+  onOutpaint: (frame: OutpaintFrame) => OutpaintFrame;
   onStageSize: (width: number, height: number) => void;
   onResetView: () => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const cursorShape = useRef<Konva.Circle>(null);
   const [size, setSize] = useState({ width: 1, height: 1 });
-  const painting = tool === "erase" || tool === "inpaint";
+  const [draft, setDraftState] = useState<CropRect | null>(null);
+  const draftRef = useRef<CropRect | null>(null);
+  const boxSelect = tool === "inpaint" && selectionMode === "box";
+  const painting = (tool === "erase" || tool === "inpaint") && !boxSelect;
+  const setDraft = (rect: CropRect | null) => {
+    draftRef.current = rect;
+    setDraftState(rect);
+  };
   const liveView = { ...view, stageWidth: size.width, stageHeight: size.height };
   const mask = useMask(liveView, maskMode, brushSize, onStroke, painting);
   const space = useRef(false);
   const api = useRef({
     tool,
+    locked,
     liveView,
     outpaint,
     painting,
+    boxSelect,
+    selection,
     documentState,
     brushSize,
     mask,
+    onSelection,
     onPan,
     onZoom,
     onOutpaint,
@@ -68,12 +91,16 @@ export function EditorCanvas({
   });
   api.current = {
     tool,
+    locked,
     liveView,
     outpaint,
     painting,
+    boxSelect,
+    selection,
     documentState,
     brushSize,
     mask,
+    onSelection,
     onPan,
     onZoom,
     onOutpaint,
@@ -129,10 +156,24 @@ export function EditorCanvas({
       }
       const point = pointOf(event);
       const current = api.current;
+      if (current.locked) return;
       node.setPointerCapture(event.pointerId);
       if (space.current || current.tool === "view" || current.tool === "pan" || current.tool === "crop") {
         drag = { kind: "pan", ...point };
         node.classList.add("is-dragging");
+        return;
+      }
+      if (current.boxSelect) {
+        const imagePoint = screenToImage(point.x, point.y, current.liveView);
+        const hit = current.selection ? cropGesture(point.x, point.y, current.selection, current.liveView) : null;
+        if (hit === "move" && current.selection) {
+          drag = { kind: "select-move", ...point, rect: current.selection };
+        } else if (hit && current.selection) {
+          drag = { kind: "select-resize", handle: hit, ...point, rect: current.selection };
+        } else {
+          drag = { kind: "select-new", origin: imagePoint };
+          setDraft({ x: imagePoint.x, y: imagePoint.y, width: 0, height: 0 });
+        }
         return;
       }
       if (current.painting) {
@@ -150,14 +191,7 @@ export function EditorCanvas({
           current.documentState.height,
           current.liveView,
         );
-        if (hit === "image") {
-          drag = { kind: "outpaint-image", ...point, frame: current.outpaint };
-        } else if (hit) {
-          drag = { kind: "outpaint-edge", edge: hit, ...point, frame: current.outpaint };
-        } else {
-          drag = { kind: "pan", ...point };
-          node.classList.add("is-dragging");
-        }
+        if (hit) drag = { kind: "outpaint-edge", edge: hit, ...point, frame: current.outpaint };
       }
     };
     const onMove = (event: PointerEvent) => {
@@ -166,7 +200,12 @@ export function EditorCanvas({
       if (current.painting) {
         placeCursor(point.x, point.y);
       }
+      if (current.locked) { drag = null; return; }
       if (!drag) {
+        if (current.tool === "outpaint" && current.outpaint) {
+          const hit = outpaintGesture(point.x, point.y, current.outpaint, current.documentState.width, current.documentState.height, current.liveView);
+          node.style.cursor = hit ? outpaintCursor(hit) : "default";
+        }
         return;
       }
       if (drag.kind === "pan") {
@@ -178,22 +217,51 @@ export function EditorCanvas({
         current.mask.move(point.x, point.y);
         return;
       }
+      if (drag.kind === "select-new") {
+        const imagePoint = screenToImage(point.x, point.y, current.liveView);
+        setDraft({
+          x: drag.origin.x,
+          y: drag.origin.y,
+          width: imagePoint.x - drag.origin.x,
+          height: imagePoint.y - drag.origin.y,
+        });
+        return;
+      }
+      if (drag.kind === "select-move" || drag.kind === "select-resize") {
+        const before = screenToImage(drag.x, drag.y, current.liveView);
+        const after = screenToImage(point.x, point.y, current.liveView);
+        const dx = after.x - before.x;
+        const dy = after.y - before.y;
+        const next = drag.kind === "select-move"
+          ? moveSelection(drag.rect, dx, dy, current.documentState.width, current.documentState.height)
+          : resizeSelection(drag.rect, drag.handle, dx, dy, current.documentState.width, current.documentState.height);
+        if (next) {
+          setDraft(next);
+          drag = { ...drag, ...point, rect: next };
+        }
+        return;
+      }
       const before = screenToImage(drag.x, drag.y, current.liveView);
       const after = screenToImage(point.x, point.y, current.liveView);
       const dx = after.x - before.x;
       const dy = after.y - before.y;
-      if (drag.kind === "outpaint-image") {
-        const frame = moveImage(drag.frame, dx, dy, current.documentState.width, current.documentState.height);
-        current.onOutpaint(frame);
-        drag = { kind: "outpaint-image", ...point, frame };
-        return;
-      }
-      const frame = resizeFrame(drag.frame, drag.edge, dx, dy, current.documentState.width, current.documentState.height);
-      current.onOutpaint(frame);
+      const resized = resizeOutpaint(drag.frame, drag.edge, dx, dy, current.documentState.width, current.documentState.height);
+      const frame = current.onOutpaint(resized);
       drag = { kind: "outpaint-edge", edge: drag.edge, ...point, frame };
     };
-    const finish = () => {
-      api.current.mask.end();
+    const finish = (event: PointerEvent) => {
+      const current = api.current;
+      current.mask.end();
+      if (drag?.kind === "select-new" && event.type === "pointerup") {
+        const next = draftRef.current
+          ? clampSelection(draftRef.current, current.documentState.width, current.documentState.height)
+          : null;
+        current.onSelection(next);
+      }
+      if ((drag?.kind === "select-move" || drag?.kind === "select-resize") && event.type === "pointerup" && draftRef.current) {
+        current.onSelection(draftRef.current);
+      }
+      setDraft(null);
       drag = null;
       node.classList.remove("is-dragging");
     };
@@ -246,7 +314,7 @@ export function EditorCanvas({
   const placed = imageToScreen(liveView.imageWidth / 2, liveView.imageHeight / 2, liveView);
 
   return (
-    <div className={`image-editor-stage tool-${tool}`} ref={host}>
+    <div className={`image-editor-stage tool-${tool}${boxSelect ? " is-box" : ""}${locked ? " is-outpaint-loading" : ""}`} ref={host}>
       <Stage height={size.height} width={size.width}>
         <Layer>
           <Group
@@ -258,15 +326,16 @@ export function EditorCanvas({
             x={placed.x}
             y={placed.y}
           >
-            {tool === "outpaint" && outpaint ? <OutpaintBackdrop frame={outpaint} /> : null}
+            {tool === "outpaint" && outpaint ? <OutpaintBackdrop frame={outpaint} pending={locked} /> : null}
             <KonvaImage
               height={documentState.height}
               image={documentState.source}
               listening={false}
               width={documentState.width}
             />
-            <MaskLayer draftRef={mask.draft} strokes={documentState.strokes} />
-            {tool === "outpaint" && outpaint ? <OutpaintHandles frame={outpaint} scale={scale || 1} /> : null}
+            {tool !== "outpaint" && <MaskLayer draftRef={mask.draft} strokes={documentState.strokes} />}
+            {boxSelect ? <SelectionFrame imageHeight={documentState.height} imageWidth={documentState.width} rect={draft ?? selection} scale={scale || 1} /> : null}
+            {tool === "outpaint" && outpaint ? <OutpaintHandles frame={outpaint} scale={scale || 1} originalWidth={documentState.width} originalHeight={documentState.height} /> : null}
           </Group>
           {tool === "crop" ? <CropTool rect={fixedCropFrame(liveView, cropRatio)} /> : null}
           {painting ? <BrushCursor radius={(brushSize * scale) / 2} ref={cursorShape} /> : null}
@@ -276,43 +345,53 @@ export function EditorCanvas({
   );
 }
 
-function moveImage(frame: OutpaintFrame, dx: number, dy: number, imageWidth: number, imageHeight: number): OutpaintFrame {
-  return {
-    ...frame,
-    imageX: Math.min(Math.max(0, frame.imageX + dx), Math.max(0, frame.width - imageWidth)),
-    imageY: Math.min(Math.max(0, frame.imageY + dy), Math.max(0, frame.height - imageHeight)),
-  };
+function outpaintCursor(edge: OutpaintEdge) {
+  if (edge === "n" || edge === "s") return "ns-resize";
+  if (edge === "e" || edge === "w") return "ew-resize";
+  if (edge === "nw" || edge === "se") return "nwse-resize";
+  return "nesw-resize";
 }
 
-function resizeFrame(
-  frame: OutpaintFrame,
-  edge: "n" | "s" | "e" | "w",
-  dx: number,
-  dy: number,
-  imageWidth: number,
-  imageHeight: number,
-): OutpaintFrame {
-  let { width, height, imageX, imageY } = frame;
-  if (edge === "e") {
-    width += dx;
+function SelectionFrame({
+  rect,
+  imageWidth,
+  imageHeight,
+  scale,
+}: {
+  rect: CropRect | null;
+  imageWidth: number;
+  imageHeight: number;
+  scale: number;
+}) {
+  if (!rect || rect.width === 0 || rect.height === 0) {
+    return null;
   }
-  if (edge === "s") {
-    height += dy;
-  }
-  if (edge === "w") {
-    imageX -= dx;
-    width -= dx;
-  }
-  if (edge === "n") {
-    imageY -= dy;
-    height -= dy;
-  }
-  imageX = Math.max(0, imageX);
-  imageY = Math.max(0, imageY);
-  return {
-    imageX,
-    imageY,
-    width: Math.max(imageWidth + imageX, width),
-    height: Math.max(imageHeight + imageY, height),
-  };
+  const left = Math.min(rect.x, rect.x + rect.width);
+  const top = Math.min(rect.y, rect.y + rect.height);
+  const width = Math.abs(rect.width);
+  const height = Math.abs(rect.height);
+  const stroke = Math.max(1 / scale, 0.5);
+  const handle = 8 / scale;
+  const handles = [
+    [left, top],
+    [left + width, top],
+    [left, top + height],
+    [left + width, top + height],
+    [left + width / 2, top],
+    [left + width, top + height / 2],
+    [left + width / 2, top + height],
+    [left, top + height / 2],
+  ];
+  return (
+    <>
+      <Rect fill="rgba(0,0,0,0.45)" height={top} listening={false} width={imageWidth} x={0} y={0} />
+      <Rect fill="rgba(0,0,0,0.45)" height={Math.max(0, imageHeight - top - height)} listening={false} width={imageWidth} x={0} y={top + height} />
+      <Rect fill="rgba(0,0,0,0.45)" height={height} listening={false} width={left} x={0} y={top} />
+      <Rect fill="rgba(0,0,0,0.45)" height={height} listening={false} width={Math.max(0, imageWidth - left - width)} x={left + width} y={top} />
+      <Rect height={height} listening={false} stroke="#d3f96b" strokeWidth={stroke} width={width} x={left} y={top} />
+      {handles.map(([x, y]) => (
+        <Rect fill="#d3f96b" height={handle} key={`${x}:${y}`} listening={false} width={handle} x={x - handle / 2} y={y - handle / 2} />
+      ))}
+    </>
+  );
 }

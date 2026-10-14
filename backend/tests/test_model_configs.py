@@ -101,6 +101,17 @@ def test_members_read_enabled_models_without_secrets(api) -> None:
     assert "secret_ref" not in listed.text
     assert LEAKED_KEY not in listed.text
     assert "old-video" not in listed.text
+    restored = client.patch(
+        f"/api/v1/admin/model-configs/{hidden['id']}",
+        json={"enabled": True},
+        headers=_mutation_headers(client, settings),
+    )
+    assert restored.status_code == 200
+    visible_again = client.get(f"/api/v1/projects/{project_id}/models")
+    assert {item["model_name"] for item in visible_again.json()["items"]} == {
+        "gpt-4o",
+        "old-video",
+    }
 
     blocked = client.get(f"/api/v1/projects/{project_id}/models?capability=not-a-capability")
     assert blocked.status_code == 422
@@ -167,7 +178,7 @@ def test_non_admin_and_secret_writes_stay_closed(api) -> None:
     assert asyncio.run(_config_count(settings.database_url)) == 0
 
 
-def test_published_version_can_only_be_disabled(api) -> None:
+def test_published_content_stays_immutable_and_can_be_restored(api) -> None:
     client, settings = api
     asyncio.run(_create_user(settings, "owner@example.com", PASSWORD))
     _login(client, settings, "owner@example.com", PASSWORD)
@@ -189,7 +200,8 @@ def test_published_version_can_only_be_disabled(api) -> None:
         json={"enabled": True},
         headers=_mutation_headers(client, settings),
     )
-    assert enabled.status_code == 422
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
     current = client.get("/api/v1/admin/model-configs")
     assert current.status_code == 200
     stored = next(item for item in current.json()["items"] if item["id"] == first["id"])
@@ -209,8 +221,22 @@ def test_published_version_can_only_be_disabled(api) -> None:
         headers=_mutation_headers(client, settings),
     )
     assert again.status_code == 200
+    restored = client.patch(
+        f"/api/v1/admin/model-configs/{first['id']}",
+        json={"enabled": True},
+        headers=_mutation_headers(client, settings),
+    )
+    assert restored.status_code == 200
+    assert restored.json()["enabled"] is True
+    assert restored.json()["model_name"] == "gpt-4o"
+    repeated = client.patch(
+        f"/api/v1/admin/model-configs/{first['id']}",
+        json={"enabled": True},
+        headers=_mutation_headers(client, settings),
+    )
+    assert repeated.status_code == 200
     audits = asyncio.run(_audits(settings.database_url))
-    assert [row[3] for row in audits] == ["created", "created", "disabled"]
+    assert [row[3] for row in audits] == ["created", "created", "disabled", "enabled"]
     assert all(LEAKED_KEY not in " ".join(map(str, row)) for row in audits)
     assert "secret_ref" not in asyncio.run(_audit_columns(settings.database_url))
 
@@ -273,6 +299,19 @@ def test_a_business_uses_only_its_assigned_model(api) -> None:
         item for item in cleared.json()["items"] if item["capability"] == "text_generation"
     )
     assert text_row["model_config_id"] is None
+    restored = client.patch(
+        f"/api/v1/admin/model-configs/{other['id']}",
+        json={"enabled": True},
+        headers=_mutation_headers(client, settings),
+    )
+    assert restored.status_code == 200
+    still_cleared = client.get("/api/v1/admin/model-assignments")
+    restored_row = next(
+        item
+        for item in still_cleared.json()["items"]
+        if item["capability"] == "text_generation"
+    )
+    assert restored_row["model_config_id"] is None
     video_only = client.put(
         "/api/v1/admin/model-assignments/text_to_video",
         json={"model_config_id": video["id"]},
@@ -285,6 +324,13 @@ def test_a_business_uses_only_its_assigned_model(api) -> None:
     missing = client.get(f"/api/v1/projects/{project_id}/active-model?capability=text_generation")
     assert missing.status_code == 404
     _login(client, settings, owner.email, PASSWORD)
+    reassigned = client.put(
+        "/api/v1/admin/model-assignments/text_generation",
+        json={"model_config_id": other["id"]},
+        headers=_mutation_headers(client, settings),
+    )
+    assert reassigned.status_code == 200
+    assert reassigned.json()["model_config_id"] == other["id"]
     client.put(
         "/api/v1/admin/model-assignments/text_generation",
         json={"model_config_id": text["id"]},
@@ -317,6 +363,89 @@ def test_cli_grants_platform_admin_without_a_password(api, monkeypatch, capsys) 
     assert PASSWORD not in captured.err
     logged_in = _login(client, settings, "admin@example.com", PASSWORD)
     assert logged_in.json()["user"]["platform_admin"] is True
+
+
+def test_provider_catalog_drives_registration(api, tmp_path) -> None:
+    _, base = api
+    secret = "catalog-key-not-real"
+    path = tmp_path / "model-endpoints.yaml"
+    path.write_text(
+        "\n".join(
+            [
+                "qianwen:",
+                "  base_url: https://example.test/v1",
+                "  api_key: " + secret,
+                "  alias:",
+                "    zh: 千问",
+                "    en: Qianwen",
+                "  models:",
+                "    qwen-image-2.0:",
+                "      capabilities: [text_to_image]",
+                "      parameters:",
+                "        sizes: ['1024x1024']",
+                "    qwen-image-3.0:",
+                "      alias:",
+                "        zh: 千问图像 3.0",
+                "        en: Qwen Image 3.0",
+                "      capabilities: [text_to_image]",
+                "      parameters:",
+                "        sizes: ['1024x1024', '2048x2048']",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    settings = make_settings(
+        database_url=base.database_url,
+        csrf_secret="test-csrf-secret-value-with-32b",
+        cors_allowed_origins=[ORIGIN],
+        model_endpoints_file=str(path),
+    )
+    with TestClient(create_app(settings)) as client:
+        owner = asyncio.run(_create_user(settings, "catalog@example.com", PASSWORD))
+        _login(client, settings, owner.email, PASSWORD)
+        hidden = client.get("/api/v1/admin/model-catalog")
+        assert hidden.status_code == 404
+        assert secret not in hidden.text
+        asyncio.run(_grant(settings, owner.email))
+        listed = client.get("/api/v1/admin/model-catalog")
+        assert listed.status_code == 200
+        assert secret not in listed.text
+        assert "base_url" not in listed.text
+        assert "api_key" not in listed.text
+        items = listed.json()["items"]
+        assert items[0]["id"] == "qianwen"
+        assert items[0]["alias_zh"] == "千问"
+        assert items[0]["models"][1]["parameters"]["sizes"] == ["1024x1024", "2048x2048"]
+        rejected = client.post(
+            "/api/v1/admin/model-configs",
+            json={
+                "provider": "qianwen",
+                "model_name": "qwen-image-2.0",
+                "capability": "text_to_image",
+                "parameters_schema": {"sizes": ["2048x2048"]},
+                "limits": {},
+                "secret_ref": "qianwen",
+            },
+            headers=_mutation_headers(client, settings),
+        )
+        assert rejected.status_code == 422
+        assert secret not in rejected.text
+        created = client.post(
+            "/api/v1/admin/model-configs",
+            json={
+                "provider": "qianwen",
+                "model_name": "qwen-image-3.0",
+                "capability": "text_to_image",
+                "parameters_schema": {"sizes": ["1024x1024", "2048x2048"]},
+                "limits": {},
+                "secret_ref": "qianwen",
+            },
+            headers=_mutation_headers(client, settings),
+        )
+        assert created.status_code == 201, created.text
+        assert created.json()["parameters_schema"]["sizes"] == ["1024x1024", "2048x2048"]
+        assert created.json()["secret_ref"] == "qianwen"
+        assert secret not in created.text
 
 
 def _body() -> dict[str, object]:

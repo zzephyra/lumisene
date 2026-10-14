@@ -22,13 +22,20 @@ from app.core.errors import (
 from app.core.errors import TimeoutError as ProviderTimeout
 from app.core.logging import get_logger
 from app.infrastructure.ai.adapters.dashscope_video import DashScopeVideo
-from app.infrastructure.ai.catalog import VIDEO_RESOLUTIONS, require_assigned, require_editor_model
+from app.infrastructure.ai.catalog import video_reference_resolutions, require_assigned, require_editor_model
 from app.infrastructure.ai.domain import json_object
 from app.infrastructure.ai.models import ModelConfig
 from app.infrastructure.db.session import UnitOfWork
-from app.infrastructure.storage.s3 import S3Storage
+from app.infrastructure.storage.objects import build_object_storage
+from app.modules.generation.persistence import (
+    describe_outputs,
+    put_if_changed,
+    register_stored_assets,
+    remember_objects,
+    storage_identity,
+)
 from app.modules.generation.inputs import require_input
-from app.modules.generation.models import Asset, GenerationOutput, GenerationTask
+from app.modules.generation.models import GenerationTask
 
 logger = get_logger(__name__)
 _IDEMPOTENCY_KEY = re.compile(r"^[\x21-\x7e]{1,128}$")
@@ -81,7 +88,7 @@ class VideoGenerationService:
         self.settings = settings
         self.session_factory = session_factory
         self.client = client or DashScopeVideo()
-        self.storage = storage or S3Storage(settings)
+        self.storage = storage or build_object_storage(settings)
 
     async def submit(
         self,
@@ -109,8 +116,9 @@ class VideoGenerationService:
                 or type(parameters.get("duration", 5)) is not int
             ):
                 raise ValidationError("图生视频当前仅支持 5 秒")
-            resolution = parameters.get("resolution", VIDEO_RESOLUTIONS[config.model_name][0])
-            if resolution not in VIDEO_RESOLUTIONS[config.model_name]:
+            resolutions = video_reference_resolutions(config, self.settings)
+            resolution = parameters.get("resolution", resolutions[0])
+            if resolution not in resolutions:
                 raise ValidationError("该模型不支持所选清晰度")
             safe_parameters = {"duration": 5, "resolution": resolution}
         else:
@@ -329,6 +337,8 @@ class VideoGenerationService:
         if loaded is None:
             return
         model_config_id, provider_task_id, started_at = loaded
+        if await self.finish_persisted(task_id):
+            return
         try:
             state, video = await self._call_poll(model_config_id, provider_task_id)
         except ProviderTimeout:
@@ -529,43 +539,35 @@ class VideoGenerationService:
         actor_id: UUID,
         video: tuple[bytes, str],
     ) -> None:
-        content, mime = video
-        asset_id = uuid4()
-        object_key = f"projects/{project_id}/assets/{asset_id}/video.mp4"
-        await self.storage.put_object(object_key=object_key, content=content, content_type=mime)
-        now = datetime.now(UTC)
+        del actor_id
+        items = describe_outputs(project_id, task_id, [video])
+        await put_if_changed(
+            self.storage,
+            object_key=items[0]["object_key"],
+            content=video[0],
+            content_type=items[0]["mime"],
+        )
+        provider, bucket = storage_identity(self.storage, self.settings)
         factory = self._factory()
         async with factory() as session:
-            session.add(
-                Asset(
-                    id=asset_id,
-                    project_id=project_id,
-                    kind="VIDEO",
-                    object_key=object_key,
-                    sha256=hashlib.sha256(content).hexdigest(),
-                    mime=mime,
-                    size_bytes=len(content),
-                    width=None,
-                    height=None,
-                    status="ready",
-                    created_by=actor_id,
-                )
+            await remember_objects(session, task_id, items)
+        async with factory() as session:
+            await register_stored_assets(
+                session, task_id, storage_provider=provider, bucket=bucket
             )
-            session.add(
-                GenerationOutput(
-                    project_id=project_id,
-                    task_id=task_id,
-                    asset_id=asset_id,
-                    ordinal=1,
-                )
-            )
-            await session.execute(
-                update(GenerationTask)
-                .where(GenerationTask.id == task_id, GenerationTask.status == "running")
-                .values(status="succeeded", phase=None, finished_at=now, updated_at=now)
-            )
-            await session.commit()
         logger.info("video_generation_succeeded", task_id=str(task_id))
+
+    async def finish_persisted(self, task_id: UUID) -> bool:
+        factory = self._factory()
+        async with factory() as session:
+            task = await session.get(GenerationTask, task_id)
+            if task is None or task.phase != "persisting":
+                return False
+        provider, bucket = storage_identity(self.storage, self.settings)
+        async with factory() as session:
+            return await register_stored_assets(
+                session, task_id, storage_provider=provider, bucket=bucket
+            )
 
     async def _fail(self, task_id: UUID, code: str, message: str) -> None:
         now = datetime.now(UTC)

@@ -1,3 +1,4 @@
+import { RotateCcw, RotateCw, Download } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import useImage from "use-image";
 
@@ -8,24 +9,24 @@ import {
   DropdownMenuTrigger,
 } from "../../../../components/ui/dropdown-menu";
 import { isApiError } from "../../../../lib/api";
-import { requestErase, requestOutpaint } from "../../image-edit";
+import { requestErase } from "../../image-edit";
 import { BrushSettings } from "./brush-settings";
 import { EditorCanvas } from "./editor-canvas";
 import { useCrop } from "./hooks/use-crop";
 import { useEditorHistory } from "./hooks/use-editor-history";
 import { useEditorTransform } from "./hooks/use-editor-transform";
-import { PromptBar } from "./prompt-bar";
-import { ASPECT_PRESETS, type EditorTool, type MaskMode, type OutpaintFrame, type Stroke } from "./types";
-import { applyAction } from "./utils/document";
+import { ASPECT_PRESETS, type CropRect, type EditorTool, type MaskMode, type Stroke } from "./types";
+import { useOutpaint } from "./hooks/use-outpaint";
+import { OutpaintToolbar } from "./outpaint-toolbar";
 import { fixedCropFrame, imageCropFromFrame } from "./utils/coordinates";
 import { downloadBlob, exportImage, type ImageMime } from "./utils/export-image";
 import { exportMask } from "./utils/export-mask";
-import { frameForRatio } from "./utils/strokes";
+
 
 import { GenerationAction, type ImageAction } from "./generation-action";
 import type { GenerationTask } from "../../image-generation";
 
-export function ImageEditor({ src, projectId, onResult }: { src: string; projectId: string; onResult: (task: GenerationTask) => void }) {
+export function ImageEditor({ src, projectId, originalPrompt = "", onResult }: { src: string; projectId: string; originalPrompt?: string; onResult: (task: GenerationTask, apply?: boolean) => void }) {
   const [action, setAction] = useState<ImageAction | null>(null);
   const [objectUrl, setObjectUrl] = useState("");
   const [loadFailed, setLoadFailed] = useState(false);
@@ -33,22 +34,27 @@ export function ImageEditor({ src, projectId, onResult }: { src: string; project
   const [stage, setStage] = useState({ width: 1, height: 1 });
   const [tool, setTool] = useState<EditorTool>("view");
   const [maskMode, setMaskMode] = useState<MaskMode>("brush");
+  const [inpaintMode, setInpaintMode] = useState<"box" | "brush">("box");
+  const [selection, setSelection] = useState<CropRect | null>(null);
   const [brushSize, setBrushSize] = useState(40);
-  const [prompt, setPrompt] = useState("");
+  const [prompt] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [frame, setFrame] = useState<OutpaintFrame | null>(null);
   const history = useEditorHistory(image ?? null, image?.naturalWidth ?? 0, image?.naturalHeight ?? 0);
   const transform = useEditorTransform();
   const documentState = history.documentState;
+  const outpaint = useOutpaint(projectId, src, documentState, originalPrompt, (task) => { setTool("view"); transform.resetView(); onResult(task, true); });
   const crop = useCrop();
+  const hasSelection = selection !== null || documentState?.strokes.some((stroke) => stroke.mode === "add") === true;
 
   useEffect(() => {
     const controller = new AbortController();
     let url = "";
     setLoadFailed(false);
     setObjectUrl("");
-    fetch(src, { credentials: "include", signal: controller.signal })
+    // Cloud assets authenticate with signed URLs, not application cookies.
+    // Including credentials rejects common CDN CORS responses (Allow-Origin: *).
+    fetch(src, { credentials: "same-origin", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) {
           throw new Error("load");
@@ -71,12 +77,20 @@ export function ImageEditor({ src, projectId, onResult }: { src: string; project
     };
   }, [src]);
 
-  const view = transform.viewFor(
+  useEffect(() => {
+    setSelection(null);
+  }, [src, documentState?.width, documentState?.height]);
+
+  useEffect(() => { setTool("view"); setAction(null); }, [src]);
+
+  const baseView = transform.viewFor(
     stage.width,
     stage.height,
     documentState?.width ?? 1,
     documentState?.height ?? 1,
   );
+  // Fit stays tied to the original. The frame grows around it and must not rescale those pixels.
+  const view = tool === "outpaint" ? { ...baseView, zoom: baseView.zoom * 0.62, padBottom: 200 } : baseView;
   const onStageSize = useCallback((width: number, height: number) => {
     setStage({ width, height });
   }, []);
@@ -87,6 +101,7 @@ export function ImageEditor({ src, projectId, onResult }: { src: string; project
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
         return;
       }
+      if (tool === "outpaint") return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
         if (event.shiftKey) {
@@ -109,6 +124,7 @@ export function ImageEditor({ src, projectId, onResult }: { src: string; project
   }, [history, tool]);
 
   function selectTool(next: EditorTool) {
+    if (outpaint.pending) return;
     setNotice(null);
     if (tool === next) {
       setTool("view");
@@ -120,7 +136,8 @@ export function ImageEditor({ src, projectId, onResult }: { src: string; project
       transform.resetView();
     }
     if (next === "outpaint" && documentState) {
-      setFrame({ width: documentState.width, height: documentState.height, imageX: 0, imageY: 0 });
+      transform.resetView();
+      outpaint.reset();
     }
   }
 
@@ -162,8 +179,8 @@ export function ImageEditor({ src, projectId, onResult }: { src: string; project
     }
   }
 
-  async function submitInpaint() {
-    if (busy || !documentState || !documentState.strokes.some(stroke => stroke.mode === "add") || prompt.trim().length === 0) {
+  async function submitInpaint(rect: CropRect | null = selection) {
+    if (busy || !documentState || !(rect || hasSelection)) {
       return;
     }
     setBusy(true);
@@ -171,36 +188,13 @@ export function ImageEditor({ src, projectId, onResult }: { src: string; project
     try {
       setAction({
         kind: "image",
+        selection: rect ? { x: rect.x / documentState.width, y: rect.y / documentState.height, width: rect.width / documentState.width, height: rect.height / documentState.height } : undefined,
         image: await exportImage(documentState.source, documentState.width, documentState.height, "image/png"),
-        mask: await exportMask(documentState.width, documentState.height, documentState.strokes),
+        mask: await exportMask(documentState.width, documentState.height, documentState.strokes, rect),
         prompt: prompt.trim(),
       });
     } catch (error) {
       setNotice(isApiError(error) ? error.message : "局部重绘没有完成");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function confirmOutpaint() {
-    if (!documentState || !frame) {
-      return;
-    }
-    const action = { type: "outpaint" as const, payload: frame };
-    const next = applyAction(documentState, action);
-    history.commit(action);
-    setTool("view");
-    setBusy(true);
-    try {
-      await requestOutpaint({
-        image: await exportImage(next.source, next.width, next.height, "image/png"),
-        width: Math.round(frame.width),
-        height: Math.round(frame.height),
-        imageX: Math.round(frame.imageX),
-        imageY: Math.round(frame.imageY),
-      });
-    } catch (error) {
-      setNotice(isApiError(error) ? `${error.message}。画布已按原图坐标扩大，空白区域不会被自动填充。` : "扩图没有完成");
     } finally {
       setBusy(false);
     }
@@ -215,31 +209,35 @@ export function ImageEditor({ src, projectId, onResult }: { src: string; project
 
   return (
     <div className="image-editor">
-      {action && <GenerationAction projectId={projectId} input={action} onClose={() => setAction(null)} onResult={task => { setAction(null); onResult(task); }} />}
+      {action && <GenerationAction projectId={projectId} input={action} onClose={() => setAction(null)} onResult={(task, apply) => { setAction(null); onResult(task, apply); }} />}
       <EditorCanvas
         brushSize={brushSize}
         cropRatio={crop.ratio}
         documentState={documentState}
         maskMode={maskMode}
-        onOutpaint={setFrame}
+        onOutpaint={outpaint.setFrame}
+        locked={outpaint.pending}
+        onSelection={(rect) => { setSelection(rect); if (rect) void submitInpaint(rect); }}
+        selection={selection}
+        selectionMode={inpaintMode}
         onPan={(dx, dy) => transform.panBy(view, dx, dy)}
         onResetView={transform.resetView}
         onStageSize={onStageSize}
         onStroke={commitStroke}
         onZoom={(factor, x, y) => transform.zoomBy(view, factor, x, y)}
-        outpaint={tool === "outpaint" ? frame : null}
+        outpaint={tool === "outpaint" ? outpaint.frame : null}
         tool={tool}
         view={view}
       />
-      <div className="image-editor-top">
+      <div className="image-editor-top" inert={tool === "outpaint"}>
         <button onClick={() => history.commit({ type: "rotate", payload: { degrees: -90 } })} type="button">
-          向左旋转
+          <RotateCcw size={15} aria-hidden="true" />向左旋转
         </button>
         <button onClick={() => history.commit({ type: "rotate", payload: { degrees: 90 } })} type="button">
-          向右旋转
+          <RotateCw size={15} aria-hidden="true" />向右旋转
         </button>
         <DropdownMenu>
-          <DropdownMenuTrigger className="image-editor-menu">导出</DropdownMenuTrigger>
+          <DropdownMenuTrigger className="image-editor-menu"><Download size={15} aria-hidden="true" />导出</DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onSelect={() => void saveImage("image/png")}>PNG</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void saveImage("image/jpeg")}>JPEG</DropdownMenuItem>
@@ -251,55 +249,20 @@ export function ImageEditor({ src, projectId, onResult }: { src: string; project
       {notice ? <p className="image-editor-note" role="status">{notice}</p> : null}
       <div className="image-editor-dock">
       {tool === "inpaint" ? (
-        <PromptBar busy={busy} hasSelection={documentState.strokes.some(stroke => stroke.mode === "add")} onChange={setPrompt} onSubmit={() => void submitInpaint()} value={prompt} />
-      ) : null}
-      {tool === "erase" || tool === "inpaint" ? (
-        <BrushSettings brushSize={brushSize} mode={maskMode} onBrushSize={setBrushSize} onMode={setMaskMode} />
-      ) : null}
-      {tool === "crop" || tool === "outpaint" ? (
         <div className="image-editor-ratios">
-          {ASPECT_PRESETS.filter((preset) => tool === "crop" || preset.ratio !== null).map((preset) => (
-            <button
-              key={preset.id}
-              onClick={() => {
-                if (tool === "crop") {
-                  crop.chooseRatio(preset.ratio);
-                  return;
-                }
-                if (documentState && preset.ratio !== null) {
-                  setFrame(frameForRatio(documentState.width, documentState.height, preset.ratio));
-                }
-              }}
-              type="button"
-            >
-              {preset.label}
-            </button>
-          ))}
-          {tool === "crop" ? (
-            <>
-              <button onClick={() => setTool("view")} type="button">取消</button>
-              <button
-                className="image-editor-confirm"
-                onClick={() => {
-                  const rect = imageCropFromFrame(view, fixedCropFrame(view, crop.ratio));
-                  history.commit({ type: "crop", payload: rect });
-                  transform.resetView();
-                  setTool("view");
-                }}
-                type="button"
-              >
-                确认裁剪
-              </button>
-            </>
-          ) : (
-            <>
-              <button onClick={() => setTool("view")} type="button">取消</button>
-              <button disabled={busy} onClick={() => void confirmOutpaint()} type="button">确认扩图</button>
-            </>
-          )}
+          <button aria-pressed={inpaintMode === "box"} onClick={() => setInpaintMode("box")} type="button">框选区域</button>
+          <button className={hasSelection ? "image-editor-confirm" : undefined} disabled={!hasSelection || busy} onClick={() => void submitInpaint()} type="button">输入重绘内容</button>
+          <button aria-pressed={inpaintMode === "brush"} onClick={() => setInpaintMode("brush")} type="button">精细选区</button>
+          <button onClick={() => { setSelection(null); setInpaintMode("box"); }} type="button">重新框选</button>
+          <button disabled={selection === null} onClick={() => setSelection(null)} type="button">清除选区</button>
         </div>
       ) : null}
-      <div className="image-editor-toolbar" role="toolbar" aria-label="图片编辑">
+      {tool === "erase" || (tool === "inpaint" && inpaintMode === "brush") ? (
+        <BrushSettings brushSize={brushSize} mode={maskMode} onBrushSize={setBrushSize} onMode={setMaskMode} />
+      ) : null}
+      {tool === "outpaint" && <OutpaintToolbar state={outpaint} onCancel={() => setTool("view")} />}
+      {tool === "crop" && <div className="image-editor-ratios">{ASPECT_PRESETS.map((preset) => <button key={preset.id} onClick={() => crop.chooseRatio(preset.ratio)} type="button">{preset.label}</button>)}<button onClick={() => setTool("view")} type="button">取消</button><button className="image-editor-confirm" onClick={() => { const rect = imageCropFromFrame(view, fixedCropFrame(view, crop.ratio)); history.commit({ type: "crop", payload: rect }); transform.resetView(); setTool("view"); }} type="button">确认裁剪</button></div>}
+      {tool !== "outpaint" && <div className="image-editor-toolbar" role="toolbar" aria-label="图片编辑">
         <button disabled={busy} onClick={() => {
           setBusy(true);
           void exportImage(documentState.source, documentState.width, documentState.height, "image/png")
@@ -308,7 +271,7 @@ export function ImageEditor({ src, projectId, onResult }: { src: string; project
             .finally(() => setBusy(false));
         }} type="button">生成视频</button>
         <button aria-pressed={tool === "inpaint"} onClick={() => selectTool("inpaint")} type="button">局部重绘</button>
-        <button aria-pressed={tool === "outpaint"} onClick={() => selectTool("outpaint")} type="button">扩图</button>
+        <button disabled={!outpaint.available} title={outpaint.reason ?? undefined} aria-pressed={false} onClick={() => selectTool("outpaint")} type="button">扩图</button>
         <button aria-pressed={tool === "erase"} onClick={() => selectTool("erase")} type="button">消除笔</button>
         <button disabled title="画质增强尚未开放" type="button">画质增强</button>
         <button aria-pressed={tool === "crop"} onClick={() => selectTool("crop")} type="button">裁剪</button>
@@ -331,7 +294,7 @@ export function ImageEditor({ src, projectId, onResult }: { src: string; project
             消除
           </button>
         ) : null}
-        {tool === "erase" || tool === "inpaint" ? (
+        {tool === "erase" || (tool === "inpaint" && inpaintMode === "brush") ? (
           <button
             disabled={documentState.strokes.length === 0}
             onClick={() => history.commit({ type: "mask-clear", payload: null })}
@@ -340,7 +303,7 @@ export function ImageEditor({ src, projectId, onResult }: { src: string; project
             清空蒙版
           </button>
         ) : null}
-      </div>
+      </div>}
       </div>
     </div>
   );

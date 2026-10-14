@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -54,6 +55,8 @@ vi.mock("../../uploads", async () => {
     useUploadAssets: () => uploadHarness,
   };
 });
+
+vi.mock("../../auth", () => ({ useSession: () => ({ data: { id: "author" } }) }));
 
 describe("asset upload entry", () => {
   beforeEach(() => {
@@ -138,7 +141,7 @@ describe("asset upload entry", () => {
 
 function renderLibrary(onGenerate = vi.fn()) {
   return render(
-    <AssetLibrary
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AssetLibrary
       assetSearch=""
       assetType="全部作品"
       onGenerate={onGenerate}
@@ -146,7 +149,7 @@ function renderLibrary(onGenerate = vi.fn()) {
       setAssetType={() => undefined}
       setView={() => undefined}
       view="grid"
-    />,
+    /></QueryClientProvider>,
   );
 }
 

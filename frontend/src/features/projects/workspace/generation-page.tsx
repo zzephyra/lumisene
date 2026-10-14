@@ -1,3 +1,8 @@
+import { WorksPanel } from "./works-panel";
+import { AlertDialog, AlertDialogContent, AlertDialogTitle, AlertDialogDescription } from "../../../components/ui/alert-dialog";
+import { OutpaintDebugLink } from "./outpaint-debug-link";
+import { VideoPlayer } from "../../../components/media/video-player";
+import { getEditorOptions, requestImageAction } from "../image-edit";
 import { brand } from "../../../brand";
 import { EditVideoButton, RecentEdits } from "../../video-editor";
 import { Check, Copy, Film, Image, Plus, Sparkles, Trash2, WandSparkles, X } from "lucide-react";
@@ -7,6 +12,7 @@ import { GenerationLoadingCard, generationAspectRatio } from "../../../component
 import { Button } from "../../../components/ui/button";
 import { LumiMark } from "../../../components/brand/LumiLogo";
 import { userFacingMessage } from "../../../lib/api";
+import { deleteWork, deletionMessage } from "../asset-deletion";
 import { formatBytes } from "../../uploads";
 import type { ReferenceAsset } from "./reference-asset";
 import { imageParameters, type RatioId, type ResolutionId } from "../image-settings";
@@ -49,11 +55,48 @@ export function GenerationPage({
   referenceAsset?: ReferenceAsset | null;
   onClearReference?: () => void;
 }) {
+  const thumbsRef = useRef<HTMLElement>(null);
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const [referenceFile, setReferenceFile] = useState<File | null>(null);
+  const [referenceUrl, setReferenceUrl] = useState("");
+  const [videoOption, setVideoOption] = useState<Awaited<ReturnType<typeof getEditorOptions>>[number] | null>(null);
+  const [imageOption, setImageOption] = useState<Awaited<ReturnType<typeof getEditorOptions>>[number] | null>(null);
+  const referenceOption = generationType === "video" ? videoOption : imageOption;
+  const [referenceResolution, setReferenceResolution] = useState("");
+  const referenceAttempt = useRef({ inputId: crypto.randomUUID(), key: "" });
+  const referenceImage = Boolean(referenceFile || referenceAsset?.category === "image");
+  const hasVideoReference = generationType === "video" && referenceImage && Boolean(videoOption?.available);
+  useEffect(() => {
+    if (!referenceFile) { setReferenceUrl(""); return; }
+    const url = URL.createObjectURL(referenceFile);
+    setReferenceUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [referenceFile]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setVideoOption(null);
+    setImageOption(null);
+    getEditorOptions(projectId, controller.signal).then((options) => {
+      if (!controller.signal.aborted) {
+        setVideoOption(options.find((item) => item.capability === "image_to_video") ?? null);
+        setImageOption(options.find((item) => item.capability === "image_to_image") ?? null);
+      }
+    }).catch(() => { if (!controller.signal.aborted) setVideoOption(null); });
+    return () => controller.abort();
+  }, [projectId, generationType]);
+  useEffect(() => { setReferenceFile(null); setReferenceResolution(""); }, [projectId]);
   const [model, setModel] = useState<ImageModel | null>(null);
   const [pending, setPending] = useState(false);
   const [task, setTask] = useState<GenerationTask | null>(null);
   const [history, setHistory] = useState<GenerationTask[]>([]);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  useEffect(() => {
+    const rail = thumbsRef.current;
+    const selected = rail?.querySelector<HTMLElement>(`[data-asset-id="${selectedAssetId}"]`);
+    if (rail && selected) rail.scrollTo?.({ top: selected.offsetTop - rail.offsetTop - rail.clientHeight / 2 + selected.clientHeight / 2, behavior: "smooth" });
+  }, [selectedAssetId, history]);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const [resolution, setResolution] = useState<ResolutionId>("1k");
@@ -229,6 +272,10 @@ export function GenerationPage({
       setError(generationType === "video" ? "画面描述请控制在 800 字以内" : "画面描述请控制在 10000 字以内");
       return;
     }
+    if (referenceImage && !referenceOption?.available) {
+      setError(referenceOption?.reason ?? "当前模型的参考图生成能力尚未就绪，请移除参考图片或刷新后重试");
+      return;
+    }
     const key = idempotencyKey ?? crypto.randomUUID();
     listEpoch.current += 1;
     setIdempotencyKey(key);
@@ -236,7 +283,19 @@ export function GenerationPage({
     setPending(true);
     setAwaitingResult(true);
     try {
-      const queued = await createImageGeneration(
+      let queued: GenerationTask;
+      if (referenceImage) {
+        let image: Blob | null = referenceFile;
+        if (!image && referenceAsset) {
+          const url = new URL(referenceAsset.url, window.location.origin);
+          const response = await fetch(url, { credentials: url.origin === window.location.origin ? "include" : "omit" });
+          if (!response.ok) throw new Error("参考图片读取失败，请重新上传");
+          image = await response.blob();
+        }
+        if (!image) throw new Error("请先添加参考图片");
+        if (referenceAttempt.current.key !== key) referenceAttempt.current = { inputId: crypto.randomUUID(), key };
+        queued = await requestImageAction(projectId, { image, prompt: cleaned, kind: generationType, resolution: referenceResolution || videoOption?.resolutions[0] || "", parameters: imageParameters(resolution, ratio, count) }, referenceAttempt.current);
+      } else queued = await createImageGeneration(
         projectId,
         cleaned,
         key,
@@ -276,14 +335,14 @@ export function GenerationPage({
             </button>
           </div>
           <div className="studio-prompt-panel">
-          <div className="studio-mode-caption"><span>{generationType === "video" ? "文生视频" : "文生图片"}</span><span>从文字开始创作</span></div>
-          {referenceAsset ? (
+          <div className="studio-mode-caption"><span>{generationType === "video" ? (hasVideoReference ? "图生视频" : "文生视频") : (referenceImage ? "图生图片" : "文生图片")}</span><span>{referenceImage ? (generationType === "video" ? "以参考图片作为首帧" : "结合参考图片与描述创作") : "从文字开始创作"}</span></div>
+          {referenceAsset && !referenceFile ? (
             <figure className="reference-selected">
               <ReferencePreview asset={referenceAsset} />
               <figcaption>
                 <strong>{referenceAsset.name}</strong>
                 <span>{formatBytes(referenceAsset.size)}</span>
-                <small>{referenceNote(referenceAsset.category)}</small>
+                <small>{hasVideoReference ? "将作为视频首帧提交给当前视频模型。" : referenceImage && imageOption?.available ? "将作为参考图提交给当前图片模型。" : referenceAsset.category === "image" ? "当前模型不支持参考图片，请移除后使用文字生成。" : referenceNote(referenceAsset.category)}</small>
               </figcaption>
               {onClearReference ? (
                 <button aria-label="移除参考素材" className="reference-clear" onClick={onClearReference} type="button">
@@ -292,10 +351,17 @@ export function GenerationPage({
               ) : null}
             </figure>
           ) : null}
-          <button className="reference-upload" disabled type="button">
-            <Plus size={16} />
-            <span>添加参考图片</span>
-            <small>暂未开放</small>
+          {referenceFile && <figure className="reference-selected"><img src={referenceUrl} alt="生成参考图片" /><figcaption><strong>{referenceFile.name}</strong><span>{formatBytes(referenceFile.size)}</span><small>{generationType === "video" ? "作为首帧生成视频" : "结合参考图生成图片"}</small></figcaption><button type="button" disabled={pending} aria-label="移除上传图片" onClick={() => { setReferenceFile(null); setIdempotencyKey(null); }}><X size={14} /></button></figure>}
+          <input ref={uploadRef} className="sr-only" aria-label={generationType === "video" ? "上传视频参考图片" : "上传图片参考图片"} type="file" accept="image/png,image/jpeg,image/webp" disabled={pending || !referenceOption?.available} onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (!file) return;
+            if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 80 * 1024 * 1024) { setError("请上传不超过 80 MB 的 PNG、JPEG 或 WebP 图片"); return; }
+            setReferenceFile(file); setIdempotencyKey(null); setError(null); onClearReference?.();
+          }} />
+          <button className="reference-upload" disabled={pending || !referenceOption?.available} onClick={() => uploadRef.current?.click()} type="button">
+            <Plus size={16} /><span>{referenceFile ? "更换参考图片" : "添加参考图片"}</span>
+            <small>{referenceOption?.available ? `PNG / JPG / WebP · ${generationType === "video" ? "首帧" : "参考图"}` : referenceOption?.reason || "正在检查参考图片能力"}</small>
           </button>
           <label className="generation-label" htmlFor="generation-prompt">
             画面描述 <span>你的想法，越具体越好</span>
@@ -371,7 +437,7 @@ export function GenerationPage({
                   </button>
                 ))}
               </div>
-              </div><div className="studio-option-row"><span>画幅</span><div role="group" aria-label="视频画幅">
+              </div><div className="studio-option-row"><span>{hasVideoReference ? "清晰度" : "画幅"}</span>{hasVideoReference ? <div role="group" aria-label="图生视频清晰度">{videoOption?.resolutions.map((value) => <button key={value} type="button" aria-pressed={(referenceResolution || videoOption.resolutions[0]) === value} onClick={() => { setReferenceResolution(value); setIdempotencyKey(null); }}>{value}</button>)}<small>画幅跟随首帧</small></div> : <div role="group" aria-label="视频画幅">
                 {(["16:9", "9:16", "1:1"] as const).map((item) => (
                   <button
                     aria-pressed={videoRatio === item}
@@ -385,13 +451,13 @@ export function GenerationPage({
                     {item}
                   </button>
                 ))}
-              </div>
+              </div>}
             </div></div>
           ) : null}
           {!ready && <p className="studio-unavailable">当前类型暂无可用模型，请联系管理员配置。</p>}
           <Button
             className="generate-button"
-            disabled={!ready || !prompt.trim() || pending}
+            disabled={!ready || !prompt.trim() || pending || (hasVideoReference && !videoOption?.available)}
             onClick={() => void generate()}
           >
             <WandSparkles size={14} />
@@ -405,6 +471,7 @@ export function GenerationPage({
                   : "生成图片"
               : `${generationType === "video" ? "生成视频" : "生成图片"} · 暂未开放`}
           </Button>
+          {generationType === "image" && <OutpaintDebugLink projectId={projectId} taskId={history.find(item => item.output_asset_ids.includes(assetIds[0]!))?.id ?? task?.id} />}
           {generationType === "video" && <RecentEdits projectId={projectId} />}
           <p className="studio-submit-note">内容由 AI 生成 · 结果保存在当前项目</p>
           </div>
@@ -436,22 +503,18 @@ export function GenerationPage({
               />
             ) : assetIds[0] && generationType === "video" ? (
               <div className="generation-video-frame">
-                <video
-                  className="generation-result-video"
-                  controls
-                  playsInline
-                  src={assetContentPath(projectId, assetIds[0])}
-                />
-                <EditVideoButton projectId={projectId} assetId={assetIds[0]} />
+                <VideoPlayer key={assetIds[0]} src={assetContentPath(projectId, assetIds[0])}
+                  prompt={history.find(item => item.output_asset_ids.includes(assetIds[0]!))?.prompt ?? (task?.output_asset_ids.includes(assetIds[0]!) ? task.prompt : undefined)}
+                  actions={<EditVideoButton projectId={projectId} assetId={assetIds[0]} />} />
               </div>
             ) : assetIds[0] ? (
               <Suspense fallback={null}>
-                <ImageEditor key={`${projectId}:${assetIds[0]}`} projectId={projectId} src={assetContentPath(projectId, assetIds[0])} onResult={result => {
+                <ImageEditor key={`${projectId}:${assetIds[0]}`} projectId={projectId} originalPrompt={history.find((item) => item.output_asset_ids.includes(assetIds[0]!))?.prompt ?? ""} src={assetContentPath(projectId, assetIds[0])} onResult={(result, apply = true) => {
                   if (result.kind !== generationType) setGenerationType(result.kind);
                   setTask(result);
                   setPending(!["succeeded", "failed", "canceled"].includes(result.status));
                   setAwaitingResult(!["succeeded", "canceled"].includes(result.status));
-                  setSelectedAssetId(result.output_asset_ids[0] ?? null);
+                  if (apply) setSelectedAssetId(result.output_asset_ids[0] ?? null);
                   setHistory(current => [result, ...current.filter(item => item.id !== result.id)]);
                 }} />
               </Suspense>
@@ -470,14 +533,49 @@ export function GenerationPage({
             )}
           </div>
         </section>
-        <aside aria-label="生成结果" className="generation-thumbs">
+        <WorksPanel onRegenerate={(item) => { setPrompt(item.prompt); setIdempotencyKey(null); setToast({ message: "已填入原作品提示词，请确认生成设置后点击生成。", tone: "success" }); }} projectId={projectId} kind={generationType} history={history} onSelect={(id, items) => { setHistory(items); setAwaitingResult(false); setSelectedAssetId(id); }} onDelete={(ids) => { setHistory(current => current.map(item => ({ ...item, output_asset_ids: item.output_asset_ids.filter(id => !ids.includes(id)) }))); setSelectedAssetId(current => current && ids.includes(current) ? null : current); setTask(current => current ? { ...current, output_asset_ids: current.output_asset_ids.filter(id => !ids.includes(id)) } : current); }} />
+        <aside ref={thumbsRef} aria-label="生成结果" className="generation-thumbs">
           <span className="studio-history-label">本项目作品 <small>{generationType === "video" ? "视频" : "图片"}</small></span>
+          {deleteTarget ? (
+            <AlertDialog open onOpenChange={(open) => { if (!open && !deleting) setDeleteTarget(null); }}>
+            <AlertDialogContent className="work-delete-dialog">
+              <AlertDialogTitle className="work-delete-title">删除这个作品？</AlertDialogTitle>
+              <AlertDialogDescription className="work-delete-description">删除后，作品将从列表中移除。云端文件按管理员设置的策略保留或清理。</AlertDialogDescription>
+              <div className="work-delete-actions">
+              <Button variant="outline" disabled={deleting} onClick={() => setDeleteTarget(null)} type="button">取消</Button>
+              <Button variant="danger"
+                disabled={deleting}
+                onClick={() => {
+                  const assetId = deleteTarget;
+                  setDeleting(true);
+                  void deleteWork(projectId, assetId)
+                    .then((result) => {
+                      setHistory((current) => current.map((item) => ({
+                        ...item,
+                        output_asset_ids: item.output_asset_ids.filter((id) => id !== assetId),
+                      })));
+                      setSelectedAssetId((current) => current === assetId ? null : current);
+                      setTask((current) => current ? { ...current, output_asset_ids: current.output_asset_ids.filter((id) => id !== assetId) } : current);
+                      setToast({ message: deletionMessage(result), tone: result.purge_status === "failed" ? "danger" : "success" });
+                      setDeleteTarget(null);
+                    })
+                    .catch((reason) => setToast({ message: userFacingMessage(reason), tone: "danger" }))
+                    .finally(() => setDeleting(false));
+                }}
+                type="button"
+              >
+                {deleting ? "正在删除…" : "确认删除"}
+              </Button>
+              </div>
+            </AlertDialogContent>
+            </AlertDialog>
+          ) : null}
           {thumbnails.length === 0 && <span className="studio-history-empty">完成生成后，可在此切换查看作品</span> }
           {thumbnails.map((assetId) => (
+            <div className="studio-thumb-item" data-asset-id={assetId} key={assetId}>
             <button
               aria-label={generationType === "video" ? "查看这条生成结果" : "查看这张生成结果"}
               aria-pressed={assetId === selectedAssetId}
-              key={assetId}
               onClick={() => {
                 if (pending) {
                   return;
@@ -493,6 +591,8 @@ export function GenerationPage({
                 <img alt="" src={assetContentPath(projectId, assetId)} />
               )}
             </button>
+            <button className="studio-thumb-delete" aria-label="删除这件作品" title="删除作品" disabled={deleting} onClick={() => setDeleteTarget(assetId)} type="button"><Trash2 size={14} aria-hidden="true" /></button>
+            </div>
           ))}
         </aside>
       </div>

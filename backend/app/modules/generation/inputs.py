@@ -4,50 +4,33 @@ import asyncio
 import base64
 import hashlib
 from datetime import UTC, datetime, timedelta
-from io import BytesIO
 from typing import Protocol
 from uuid import UUID
 
-from PIL import Image, ImageChops, UnidentifiedImageError
+from PIL import Image, ImageChops
 from sqlalchemy import exists, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
-from app.infrastructure.ai.catalog import VIDEO_RESOLUTIONS, require_editor_model
+from app.infrastructure.ai.catalog import (
+    require_editor_model,
+    require_outpaint_model,
+    video_reference_resolutions,
+)
+from app.infrastructure.ai.image_codec import MAX_BYTES, MAX_PIXELS, decode_image, png  # noqa: F401
 from app.infrastructure.db.session import UnitOfWork
 from app.modules.generation.models import GenerationInput, GenerationTask
 
-MAX_BYTES = 80 * 1024 * 1024
-MAX_PIXELS = 16_777_216
 
-
-def decode_image(content: bytes) -> Image.Image:
-    if not content or len(content) > MAX_BYTES:
-        raise ValidationError("图片不得超过 80 MB")
-    try:
-        with Image.open(BytesIO(content)) as image:
-            if (
-                image.format not in {"PNG", "JPEG", "WEBP"}
-                or image.width * image.height > MAX_PIXELS
-            ):
-                raise ValidationError("图片格式或像素尺寸不受支持")
-            if image.width > 8000 or image.height > 8000 or getattr(image, "n_frames", 1) != 1:
-                raise ValidationError("仅支持边长不超过 8000 的静态图片")
-            image.load()
-            return image.convert("RGBA")
-    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
-        raise ValidationError("图片文件无法解码") from exc
-
-
-def png(image: Image.Image) -> bytes:
-    stream = BytesIO()
-    image.save(stream, format="PNG")
-    data = stream.getvalue()
-    if len(data) > MAX_BYTES:
-        raise ValidationError("处理后的图片不得超过 80 MB，请缩小图片")
-    return data
+def image_edit_limits(config) -> dict[str, int]:
+    bounds = {"max_width": 8000, "max_height": 8000, "max_pixels": MAX_PIXELS}
+    for key, maximum in bounds.items():
+        value = config.limits.get(key)
+        if type(value) is int and value > 0:
+            bounds[key] = min(maximum, value)
+    return bounds
 
 
 def normalize(image_b64: str, mask_b64: str | None) -> tuple[bytes, bytes | None, int, int]:
@@ -63,18 +46,18 @@ def normalize(image_b64: str, mask_b64: str | None) -> tuple[bytes, bytes | None
         selection = ImageChops.multiply(mask.convert("L"), mask.getchannel("A"))
         selection = selection.point(lambda value: 255 if value >= 128 else 0)
         if selection.getbbox() is None:
-            raise ValidationError("请先涂抹需要重绘的区域")
+            raise ValidationError("请先框选需要修改的区域")
         mask_bytes = png(selection)
     else:
         if min(image.size) < 240:
-            raise ValidationError("图生视频首帧宽高至少为 240 像素")
+            raise ValidationError("参考图片宽高至少为 240 像素")
         background = Image.new("RGBA", image.size, "white")
         image = Image.alpha_composite(background, image).convert("RGB")
     return png(image), mask_bytes, image.width, image.height
 
 
 async def require_input(
-    session: AsyncSession, project_id: UUID, input_id: UUID, *, inpaint: bool
+    session: AsyncSession, project_id: UUID, input_id: UUID, *, inpaint: bool | None
 ) -> GenerationInput:
     row = (
         await session.execute(
@@ -88,7 +71,7 @@ async def require_input(
     ).scalar_one_or_none()
     if row is None or row.status != "ready":
         raise NotFoundError("生成输入不存在或尚未上传完成")
-    if bool(row.mask_key) != inpaint:
+    if inpaint is not None and bool(row.mask_key) != inpaint:
         raise ValidationError("生成输入与操作类型不匹配")
     return row
 
@@ -105,16 +88,25 @@ class GenerationInputService:
 
     async def options(self, uow: UnitOfWork) -> list[dict]:
         result = []
-        for capability in ("image_inpaint", "image_to_video"):
+        for capability in ("image_inpaint", "image_to_image", "image_to_video", "image_outpaint"):
             try:
-                config = await require_editor_model(uow, self.settings, capability)
+                config = (
+                    await require_outpaint_model(uow, self.settings)
+                    if capability == "image_outpaint"
+                    else await require_editor_model(uow, self.settings, capability)
+                )
                 result.append(
                     {
                         "capability": capability,
                         "available": True,
+                        "limits": image_edit_limits(config)
+                        if capability in {"image_inpaint", "image_outpaint"}
+                        else None,
                         "reason": None,
                         "model_name": config.model_name,
-                        "resolutions": VIDEO_RESOLUTIONS.get(config.model_name, []),
+                        "resolutions": video_reference_resolutions(config, self.settings)
+                        if capability == "image_to_video"
+                        else [],
                         "duration": 5 if capability == "image_to_video" else None,
                     }
                 )

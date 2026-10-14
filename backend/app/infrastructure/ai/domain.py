@@ -10,6 +10,17 @@ MAX_MODEL_CONFIGS = 200
 PROMPT_MAX_LENGTH = 10_000
 TEXT_COMPLETION_CONTENT_MAX = 100_000
 IMAGE_BYTES_MAX = 20 * 1024 * 1024
+QWEN_REFERENCE_EDIT_MODELS = frozenset(
+    {
+        "qwen-image-2.0",
+        "qwen-image-3.0",
+        "qwen-image-3.0-pro",
+    }
+)
+# qwen-image-2.0 rejects data-URI references on compatible images/generations.
+QWEN_NATIVE_EDIT_MODELS = frozenset({"qwen-image-2.0"})
+# wan3.0-video accepts a first-frame media item, not the older img_url field.
+WAN3_MEDIA_VIDEO_MODELS = frozenset({"wan3.0-video"})
 VIDEO_BYTES_MAX = 80 * 1024 * 1024
 MAX_JSON_BYTES = 8192
 MAX_JSON_STRING = 500
@@ -34,6 +45,7 @@ class ModelCapability(StrEnum):
 class AuditAction(StrEnum):
     CREATED = "created"
     DISABLED = "disabled"
+    ENABLED = "enabled"
     ASSIGNED = "assigned"
     UNASSIGNED = "unassigned"
 

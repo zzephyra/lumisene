@@ -191,10 +191,11 @@ button.project-switch{border:0;background:transparent;color:inherit;font:inherit
 .image-editor-stage.tool-view,.image-editor-stage.tool-pan,.image-editor-stage.tool-crop{cursor:grab}
 .image-editor-stage.is-dragging{cursor:grabbing}
 .image-editor-stage.tool-erase,.image-editor-stage.tool-inpaint{cursor:none}
-.image-editor-stage.tool-outpaint{cursor:move}
+.image-editor-stage.tool-inpaint.is-box{cursor:crosshair}
+.image-editor-stage.tool-outpaint{cursor:default}
 .image-editor-stage .konvajs-content{background:transparent}
 .image-editor-top,.image-editor-toolbar,.image-editor-ratios,.image-editor-brush,.image-editor-prompt,.image-editor-note{position:absolute;z-index:5;pointer-events:auto}
-.image-editor-top{top:8px;right:8px;display:flex;gap:6px}
+.image-editor-top{top:12px;right:12px;display:flex;align-items:center;gap:4px;max-width:calc(100% - 24px);padding:5px;border:1px solid rgb(255 255 255 / 18%);border-radius:12px;background:rgb(20 23 18 / 94%);box-shadow:0 4px 16px rgb(0 0 0 / 24%);backdrop-filter:blur(12px)}
 .image-editor-toolbar{left:50%;bottom:12px;transform:translateX(-50%);display:flex;flex-wrap:wrap;justify-content:center;gap:4px;max-width:calc(100% - 24px);padding:6px;border:1px solid rgb(59 64 50 / 80%);border-radius:16px;background:rgb(16 17 15 / 72%);backdrop-filter:blur(16px)}
 .image-editor-ratios,.image-editor-brush,.image-editor-prompt{left:50%;transform:translateX(-50%);display:flex;flex-wrap:wrap;gap:6px;max-width:calc(100% - 24px)}
 .image-editor-dock{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);z-index:6;display:flex;flex-direction:column;align-items:center;gap:8px;width:max-content;max-width:calc(100% - 24px)}
@@ -261,3 +262,27 @@ button.project-switch{border:0;background:transparent;color:inherit;font:inherit
 }
 
 .workspace-brand{display:flex;flex-direction:column;gap:5px;height:auto;font-size:16px;letter-spacing:-.04em}
+
+.outpaint-toolbar { width: min(640px, calc(100vw - 48px)); margin: 0 auto; padding: 8px 10px; border: 1px solid var(--color-line); background: rgb(16 17 15 / 88%); border-radius: 14px; pointer-events: auto; }
+.outpaint-actions { display: flex; justify-content: space-between; gap: 8px; }
+.outpaint-controls, .outpaint-controls [role=group] { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.outpaint-controls { justify-content:space-between; margin-bottom:8px; }
+.outpaint-toolbar button { padding:6px 10px; border-radius:8px; font-size:12px; }
+.outpaint-toolbar button[aria-pressed=true] { background:var(--color-primary); color:var(--color-on-primary); }
+.outpaint-toolbar input, .outpaint-toolbar textarea { width:100%; padding:8px 10px; border:1px solid var(--color-line); border-radius:8px; background:var(--color-canvas); color:var(--color-ink); font:inherit; font-size:13px; resize:vertical; }
+.outpaint-prompt { display:grid; grid-template-columns:1fr auto; gap:5px 8px; margin-bottom:8px; color:var(--color-muted); font-size:12px; }
+.outpaint-prompt textarea { grid-column:1 / -1; min-height:54px; }
+.outpaint-prompt span { grid-column:2; grid-row:1; }
+.outpaint-toolbar select { background:var(--color-canvas); border-radius:6px; padding:4px; }
+.outpaint-toolbar p, .outpaint-dimensions { font-size:12px; color:var(--color-muted); }
+.outpaint-toolbar [role=alert] { color:var(--color-danger); }
+.outpaint-toolbar fieldset { border:0; padding:0; min-width:0; }
+.image-editor-stage.is-outpaint-loading { cursor:wait; }
+.outpaint-toolbar:has(fieldset:disabled) { animation:outpaint-breathe 2s ease-in-out infinite; }
+@keyframes outpaint-breathe { 50% { border-color:var(--color-primary); } }
+@media(prefers-reduced-motion:reduce) { .outpaint-toolbar:has(fieldset:disabled) { animation:none; } }
+
+.image-editor .image-editor-top button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:8px 12px;border-radius:8px;color:#f5f5f0;white-space:nowrap;transition:background 150ms ease,color 150ms ease}
+.image-editor .image-editor-top button:hover,.image-editor .image-editor-top button[data-state="open"]{background:rgb(255 255 255 / 13%);color:#fff}
+.image-editor .image-editor-top button:focus-visible{outline:2px solid #d3f96b;outline-offset:1px}
+@media(max-width:480px){.image-editor .image-editor-top button{padding:8px;gap:4px}}

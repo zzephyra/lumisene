@@ -1,0 +1,8 @@
+.masonry-gallery{display:block;width:100%;columns:240px;column-gap:16px;text-align:left}
+.masonry-gallery-item{break-inside:avoid;margin-bottom:16px;display:flow-root}
+.masonry-gallery img,.masonry-gallery video{display:block;width:100%;height:auto;object-fit:contain}
+.masonry-gallery .asset-card-preview{height:auto;max-height:none}
+.masonry-gallery .asset-card-icon{min-height:140px}
+.masonry-gallery .asset-card{width:100%}
+@media(max-width:560px){.masonry-gallery{columns:2;column-gap:10px}.masonry-gallery-item{margin-bottom:10px}}
+@media(prefers-reduced-motion:reduce){.masonry-gallery *{transition:none!important}}

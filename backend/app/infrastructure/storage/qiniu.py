@@ -96,6 +96,10 @@ class QiniuStorageProvider:
     def public_url(self, key: str) -> str:
         return f"{self._domain()}/{quote(key)}"
 
+    def private_download_url(self, key: str, expires: int = 300) -> str:
+        self._require_config()
+        return self._auth().private_download_url(self.public_url(key), expires=expires)
+
     def upload_url(self) -> str:
         configured = self._settings.qiniu_region.strip()
         region = _REGION_ALIASES.get(configured, configured)

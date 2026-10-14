@@ -9,15 +9,23 @@ from app.infrastructure.ai.models import (
     ModelConfigAudit,
     TextCompletion,
 )
+from app.infrastructure.ai.skills import Skill, SkillRevision
 from app.infrastructure.db.base import Base
 from app.infrastructure.outbox.models import OutboxEvent
 from app.modules.auth.models import User, UserAdminAudit, UserSession
 from app.modules.editor.models import EditorAdminAudit, EditorDocument, EditorRender
 from app.modules.generation.models import (
     Asset,
+    AssetPurgeJob,
     GenerationAdminAudit,
     GenerationOutput,
     GenerationTask,
+)
+from app.modules.settings.models import (
+    SystemSetting,
+    SystemSettingAudit,
+    SystemSettingInitialization,
+    SystemSettingPublication,
 )
 from app.modules.projects.models import Project, ProjectMember
 from app.modules.uploads.models import UploadFile
@@ -31,6 +39,7 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 registered_tables = {
+    Skill.__tablename__, SkillRevision.__tablename__,
     EditorDocument.__tablename__,
     EditorRender.__tablename__,
     EditorAdminAudit.__tablename__,
@@ -46,6 +55,11 @@ registered_tables = {
     ModelAssignment.__tablename__,
     TextCompletion.__tablename__,
     Asset.__tablename__,
+    AssetPurgeJob.__tablename__,
+    SystemSetting.__tablename__,
+    SystemSettingAudit.__tablename__,
+    SystemSettingInitialization.__tablename__,
+    SystemSettingPublication.__tablename__,
     GenerationTask.__tablename__,
     GenerationOutput.__tablename__,
     UploadFile.__tablename__,

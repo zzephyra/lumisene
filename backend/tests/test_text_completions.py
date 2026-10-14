@@ -113,6 +113,96 @@ def test_settings_hide_the_endpoint_secret() -> None:
     assert LEAKED_KEY not in str(captured.value)
 
 
+def test_yaml_file_names_the_selectable_secrets(tmp_path) -> None:
+    secret = "yaml-key-not-real"
+    path = tmp_path / "model-endpoints.yaml"
+    path.write_text(
+        "qianwen:\n  base_url: https://example.test/v1\n  api_key: " + secret + "\n",
+        encoding="utf-8",
+    )
+    settings = make_settings(model_endpoints_file=str(path))
+    assert settings.configured_secret_refs() == frozenset({"qianwen"})
+    assert settings.model_endpoint("qianwen") == ("https://example.test/v1", secret)
+    assert settings.provider_catalog() == []
+    assert secret not in repr(settings)
+    broken = tmp_path / "broken.yaml"
+    broken.write_text("qianwen: [" + secret, encoding="utf-8")
+    with pytest.raises(SettingsValidation) as captured:
+        make_settings(model_endpoints_file=str(broken))
+    assert secret not in str(captured.value)
+
+
+def test_provider_catalog_rereads_added_models(tmp_path) -> None:
+    path = tmp_path / "model-endpoints.yaml"
+    path.write_text(
+        "qianwen:\n  base_url: https://example.test/v1\n  api_key: secret-a\n",
+        encoding="utf-8",
+    )
+    settings = make_settings(model_endpoints_file=str(path))
+    assert settings.provider_catalog() == []
+    path.write_text(
+        "\n".join(
+            [
+                "qianwen:",
+                "  base_url: https://example.test/v1",
+                "  api_key: secret-a",
+                "  alias:",
+                "    zh: 千问",
+                "    en: Qianwen",
+                "  models:",
+                "    qwen-plus:",
+                "      capabilities: [text_generation]",
+                "      parameters: {}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    catalog = settings.provider_catalog()
+    assert catalog[0]["alias_zh"] == "千问"
+    assert catalog[0]["models"][0]["name"] == "qwen-plus"
+    assert catalog[0]["models"][0]["inputs"] == []
+    assert "secret-a" not in str(catalog)
+
+
+def test_provider_catalog_publishes_declared_input_modalities(tmp_path) -> None:
+    path = tmp_path / "model-endpoints.yaml"
+    path.write_text(
+        "\n".join(
+            [
+                "wan_video:",
+                "  base_url: https://example.test/v1",
+                "  api_key: secret-not-shown",
+                "  models:",
+                "    wan3.0-video:",
+                "      capabilities: [text_to_video]",
+                "      inputs: [text, image, video, audio]",
+                "      parameters: {}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    catalog = make_settings(model_endpoints_file=str(path)).provider_catalog()
+    assert catalog[0]["models"][0]["inputs"] == ["text", "image", "video", "audio"]
+    assert "secret-not-shown" not in str(catalog)
+    path.write_text(
+        "\n".join(
+            [
+                "wan_video:",
+                "  base_url: https://example.test/v1",
+                "  api_key: secret-not-shown",
+                "  models:",
+                "    wan3.0-video:",
+                "      capabilities: [text_to_video]",
+                "      inputs: [file]",
+                "      parameters: {}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(SettingsValidation):
+        make_settings(model_endpoints_file=str(path))
+
+
 def test_queue_does_not_call_provider_and_worker_stores_the_reply(text_api) -> None:
     client, settings = text_api
     owner = asyncio.run(_create_user(settings, "owner@example.com", PASSWORD))

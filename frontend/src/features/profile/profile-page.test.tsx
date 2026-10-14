@@ -2,60 +2,28 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import { getMe } from "../auth/api";
+import { beforeEach, expect, it, vi } from "vitest";
 import { ProfilePage } from "./profile-page";
-
-vi.mock("../auth/api", () => ({
-  getMe: vi.fn(),
-  logout: vi.fn(),
-  sessionQueryKey: ["auth", "session"],
-}));
-
-const projectId = "11111111-1111-4111-8111-111111111111";
-
+import { getPublicWorks } from "./works-api";
+vi.mock("../auth", () => ({ useSession: () => ({ data: { id: "author", email: "owner@example.com" } }), AccountMark: () => null }));
+vi.mock("./works-api", () => ({ getPublicWorks: vi.fn(), publicContentPath: (user: string, id: string) => `/public/${user}/${id}` }));
+beforeEach(() => vi.mocked(getPublicWorks).mockReset());
 function renderPage() {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <ProfilePage projectId={projectId} />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><MemoryRouter><ProfilePage projectId="project" /></MemoryRouter></QueryClientProvider>);
 }
-
-describe("ProfilePage", () => {
-  beforeEach(() => {
-    vi.mocked(getMe).mockReset();
-    vi.mocked(getMe).mockResolvedValue({
-      id: "user-1",
-      email: "owner@example.com",
-      platform_admin: true,
-    });
-  });
-
-  it("shows the account and an empty image area instead of generated pictures", async () => {
-    renderPage();
-
-    expect(await screen.findByRole("heading", { name: "owner@example.com" })).toBeInTheDocument();
-    expect(screen.queryByText("平台管理员")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "还没有图片作品" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "去创作" })).toHaveAttribute("href", `/projects/${projectId}`);
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "视频作品尚未开放" })).not.toBeInTheDocument();
-  });
-
-  it("keeps video on its own tab", async () => {
-    const user = userEvent.setup();
-    renderPage();
-
-    await user.click(await screen.findByRole("tab", { name: "视频" }));
-    expect(screen.getByRole("heading", { name: "视频作品尚未开放" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "还没有图片作品" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "去创作" })).not.toBeInTheDocument();
-  });
+it("shows public images with reusable masonry and a visitor link", async () => {
+  vi.mocked(getPublicWorks).mockResolvedValue([{ id: "work", kind: "image", width: 300, height: 500, published_at: "2026-10-13" }]);
+  const { container } = renderPage();
+  expect(await screen.findByRole("img", { name: "公开的图片作品" })).toHaveAttribute("src", "/public/author/work");
+  expect(container.querySelector(".masonry-gallery")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "公开主页" })).toHaveAttribute("href", "/u/author");
+  expect(getPublicWorks).toHaveBeenCalledWith("author", "image", 0, expect.any(AbortSignal));
+});
+it("switches to videos without retaining image content", async () => {
+  vi.mocked(getPublicWorks).mockResolvedValue([]);
+  renderPage();
+  expect(await screen.findByText("还没有公开的图片作品")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("tab", { name: "视频" }));
+  expect(await screen.findByText("还没有公开的视频作品")).toBeInTheDocument();
+  expect(screen.queryByText("还没有公开的图片作品")).not.toBeInTheDocument();
 });

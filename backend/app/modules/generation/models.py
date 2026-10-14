@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -32,6 +33,7 @@ _FOREIGN_KEY_TARGETS = (User, Project, ModelConfig)
 class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "assets"
     __table_args__ = (
+        Index("ix_assets_public_author", "created_by", "published_at", "id", postgresql_where=text("published_at IS NOT NULL")),
         Index("ix_assets_admin_created", "created_at", "id"),
         UniqueConstraint("project_id", "id", name="uq_assets_project_id"),
         CheckConstraint("kind IN ('IMAGE', 'VIDEO', 'AUDIO', 'FILE')", name="ck_assets_kind"),
@@ -40,6 +42,14 @@ class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="ck_assets_status",
         ),
         CheckConstraint("size_bytes > 0", name="ck_assets_size"),
+        CheckConstraint(
+            "storage_provider IN ('s3', 'qiniu')",
+            name="ck_assets_storage_provider",
+        ),
+        CheckConstraint(
+            "purge_status IS NULL OR purge_status IN ('pending', 'failed', 'purged')",
+            name="ck_assets_purge_status",
+        ),
         Index("ix_assets_project_created", "project_id", "created_at", "id"),
     )
 
@@ -55,6 +65,18 @@ class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    storage_provider: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="s3",
+        server_default="s3",
+    )
+    bucket: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    purge_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
@@ -191,3 +213,31 @@ class GenerationAdminAudit(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     before_status: Mapped[str] = mapped_column(String(32), nullable=False)
     after_status: Mapped[str] = mapped_column(String(32), nullable=False)
     request_id: Mapped[str] = mapped_column(String(128), nullable=False)
+
+
+class AssetPurgeJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """One cloud cleanup for one asset. The policy is copied when the job is created."""
+
+    __tablename__ = "asset_purge_jobs"
+    __table_args__ = (
+        UniqueConstraint("asset_id", name="uq_asset_purge_jobs_asset"),
+        CheckConstraint(
+            "status IN ('pending', 'failed', 'purged')",
+            name="ck_asset_purge_jobs_status",
+        ),
+        CheckConstraint(
+            "policy IN ('retain_cloud_file', 'delete_cloud_file')",
+            name="ck_asset_purge_jobs_policy",
+        ),
+    )
+
+    asset_id: Mapped[UUID] = mapped_column(ForeignKey("assets.id"), nullable=False)
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    storage_provider: Mapped[str] = mapped_column(String(16), nullable=False)
+    bucket: Mapped[str] = mapped_column(String(128), nullable=False)
+    policy: Mapped[str] = mapped_column(String(32), nullable=False)
+    settings_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    last_error: Mapped[str | None] = mapped_column(String(300), nullable=True)

@@ -116,9 +116,10 @@ export async function listImageGenerations(
   projectId: string,
   signal?: AbortSignal,
   kind: "image" | "video" = "image",
+ offset = 0
 ): Promise<GenerationTask[]> {
   const body = await apiRequest({
-    path: `/api/v1/projects/${projectId}/generation-tasks?kind=${kind}`,
+    path: `/api/v1/projects/${projectId}/generation-tasks?kind=${kind}&offset=${offset}`,
     signal,
   });
   if (!isRecord(body) || !Array.isArray(body.items)) {

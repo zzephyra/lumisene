@@ -40,6 +40,9 @@ export function userFacingMessage(error: unknown): string {
   if (!isApiError(error)) {
     return "无法连接服务器，请重试";
   }
+  if (error.status >= 500 && error.code === "invalid_response") {
+    return "服务器暂时不可用，请稍后重试";
+  }
   if (error.code === "authentication_error") {
     return "邮箱或密码不正确";
   }
@@ -51,6 +54,18 @@ export function userFacingMessage(error: unknown): string {
   }
   if (error.code === "network_error" || error.code === "timeout") {
     return "无法连接服务器，请重试";
+  }
+  if (error.code === "skill_disabled") {
+    return "扩图技能已停用，请管理员在技能管理中激活后重试";
+  }
+  if (error.code === "skill_not_found") {
+    return "当前技能版本尚不可用，请联系管理员";
+  }
+  if (error.code === "skill_validation_error") {
+    return "技能输入或模型配置不匹配，请检查扩图范围与模型设置";
+  }
+  if (error.code === "skill_execution_error") {
+    return "技能执行失败，请查看生成任务记录后重试";
   }
   if (error.code === "storage_unavailable") {
     return "上传服务暂不可用";

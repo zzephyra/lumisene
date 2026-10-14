@@ -49,6 +49,8 @@ GET /auth/csrf 发放短期预认证 CSRF token/cookie；登录和修改请求�
 
 下表是待实现契约。普通 DTO 至少包含 id、created_at、updated_at；可编辑聚合增加 version。项目业务 DTO 不得返回 object_key、secret_ref 或会话哈希。模型管理响应可以返回 secret_ref 名称，不能返回密钥值。
 
+平台管理员通过 GET/PATCH `/api/v1/admin/system-settings` 读取和更新作品删除策略。PATCH 必须携带当前 revision，冲突返回 409。项目成员通过 POST `/api/v1/projects/{project_id}/assets/{asset_id}/deletion` 软删除自己项目中的作品；响应里的 purge_status 表示云端清理进度，不能把 failed 当成文件已删除。GET 同路径查询该状态。七牛上的作品内容在授权后 302 到短期签名 URL。
+
 | 方法与路径 | 请求要点 | 成功响应 |
 | --- | --- | --- |
 | GET /auth/csrf | 无 | 200 {csrf_token} |
@@ -84,11 +86,12 @@ GET /auth/csrf 发放短期预认证 CSRF token/cookie；登录和修改请求�
 | GET P/active-model | capability 必填 | 200 当前指定的公开模型；未指定或非成员 404。不含 secret_ref |
 | POST P/text-completions | prompt(1–10000)；CSRF。不接受 model_config_id。服务端使用 text_generation 的当前指定 | 202 {id,status,content,error}。未指定返回 422。请求立即返回，不在请求内调用供应商 |
 | GET P/text-completions/{id} | 无 | 200 同上。非成员或跨项目 404。不含密钥 |
+| GET /admin/model-catalog | 平台管理员 | 200 {items:[{id,alias_zh,alias_en,models:[{name,alias_zh,alias_en,capabilities,inputs,parameters}]}]}。inputs 为 text、image、video、audio 的子集，未声明时为空。只含 YAML 中声明了模型的端点，不含地址和密钥。非管理员 404 |
 | GET /admin/model-configs | 平台管理员 | 200 含 secret_ref 名称与 enabled。非管理员 404 |
-| POST /admin/model-configs | provider、model_name、capability、parameters_schema、limits、secret_ref；CSRF。不得含密钥，不能指定 config_version | 201。服务端分配版本 |
-| PATCH /admin/model-configs/{id} | {enabled:false}；CSRF | 200。只能停用，不能改已发布内容。若它是当前指定，同一事务清除 |
+| POST /admin/model-configs | provider、model_name、capability、parameters_schema、limits、secret_ref；CSRF。不得含密钥，不能指定 config_version。端点已声明模型时，供应商必须等于端点名称，模型、能力和参数必须与目录一致 | 201。服务端分配版本 |
+| PATCH /admin/model-configs/{id} | {enabled:true\|false}；CSRF | 200。不能改已发布内容。停用时若它是当前指定，同一事务清除，恢复不会把该指定加回去。状态未变化时不新增审计 |
 | GET/PUT/DELETE /admin/model-assignments | PUT body 只有 model_config_id。能力必须与配置相同，且配置已启用 | 列表含全部能力，未指定的模型字段为空。非管理员 404。DELETE 204 |
-| GET/POST P/generation-tasks | POST: prompt,parameters,reference_asset_ids,kind（image 或 video，默认 image）；幂等键。不接受 model_config_id。图片 parameters 可为空，或只含 size（允许的宽x高）与 n（1–4），服务端使用 text_to_image。视频 parameters 只含 duration（5）和可选 size（1920*1080、1080*1920、1440*1440），服务端使用 text_to_video。reference_asset_ids 仍必须为空；ADR-026 通过 input_id 引用私有生成输入：image 执行 image_inpaint 且 parameters 为空、复用 text_to_image 指定；video 执行 image_to_video、复用 text_to_video 指定，duration 固定 5、resolution 来自 image-editor-options。列表可用 kind 过滤 | 列表 / 202 GenerationTask。未指定或不支持的参数返回 422。请求立即返回，不在请求内调用供应商。视频提交结果不明时保持 submitting 且不得重发 |
+| GET/POST P/generation-tasks | POST: prompt,parameters,reference_asset_ids,kind（image 或 video，默认 image）；幂等键。不接受 model_config_id。图片 parameters 可为空，或只含 size（允许的宽x高）与 n（1–4），服务端使用 text_to_image。视频 parameters 只含 duration（5）和可选 size（1920*1080、1080*1920、1440*1440），服务端使用 text_to_video。reference_asset_ids 仍必须为空；ADR-026 通过 input_id 引用私有生成输入：image 执行 image_inpaint 且 parameters 为空、复用 text_to_image 指定；video 执行 image_to_video、复用 text_to_video 指定，duration 固定 5、resolution 来自 image-editor-options。仅当该视频模型在目录中声明可接收图片时接受首帧；wan3.0-video 以 media 首帧提交，Wan 2.x 图生视频模型继续使用 img_url。列表可用 kind 过滤 | 列表 / 202 GenerationTask。未指定或不支持的参数返回 422。请求立即返回，不在请求内调用供应商。视频提交结果不明时保持 submitting 且不得重发 |
 | GET P/assets/{id}/content | 无 | 200 图片或视频字节。先校验项目成员，再在事务外读取对象。非成员或跨项目 404 |
 | GET P/generation-tasks/{id} | 无 | GenerationTask |
 | POST P/generation-tasks/{id}/cancel | 无 | 200 当前任务。仅 queued 可取消。视频进入 submitting 或 running 后返回 409，不把任务标成 canceled |
@@ -172,4 +175,22 @@ ADR-027：图片操作统一使用图片生成模型，视频操作统一使用�
 
 ### 重绘大图输入
 
-生成输入单文件上限为 80 MiB，base64 字符上限 111848108；仍限制静态图片、16,777,216 像素及单边 8000。原图与原尺寸蒙版保存在私有存储，供应商适配器仅缩放调用副本至最长边 2048 且每张不超过 8 MiB。结果回到原尺寸并按原蒙版合成，未选区像素不变。前端不再以模型调用副本的 8 MiB 限制拒绝原图。
+生成输入单文件上限为 80 MiB，base64 字符上限 111848108；仍限制静态图片、16,777,216 像素及单边 8000。原图与原尺寸蒙版保存在私有存储。调用前按选区加入周围上下文并裁剪到图片边界，再把该副本缩放到最长边 2048 且每张不超过 8 MiB；图片、蒙版和裁剪坐标同步转换。最终仍用原图合成，只在选区内替换，羽化向选区内收缩，结果保存为 PNG。图片处理失败不得退化为整图替换。前端不再以模型调用副本的 8 MiB 限制拒绝原图。
+
+### 扩图输入参数（2026-10-06）
+
+既有图片任务创建接口在存在 input_id 时接受 parameters.outpaint。该对象严格包含 original_width、original_height、target_width、target_height、offset_x、offset_y、extension（top/right/bottom/left）、blend_size。所有尺寸、偏移及边距为整数；边距非负且至少一边大于零，目标大小必须与已上传输入一致，偏移必须等于左、上边距。blend_size 为 16–64。服务端读取当前统一图片配置的 max_width/max_height/max_pixels 限制并与平台上限取最小值；元数据进入 request_snapshot，参与幂等哈希。Worker 调用供应商前验证蒙版严格保护原图矩形，再沿用统一图片编辑适配器与资产存储。历史无 overlap_size 请求：新增区域全部使用模型返回像素，禁止以原图边缘复制、拉伸、平铺或镜像填补；原图矩形像素不改写。新请求采用下述软重叠带。blend_size 暂为兼容历史请求保留并校验，不再用于扩图边缘复制融合。模型仍可能产生语义重复或结构接缝，不能把像素合成测试当作真实模型效果验证。image-editor-options 的可选 limits 字段公开有效扩图尺寸上限，不公开凭据。
+
+
+扩图连续性修订：新请求可附带 overlap_size（auto/64/128/192）、seam_refinement（前端默认 true）、preserve_subject（中心保护，非语义分割）。历史缺少这些字段的任务保留旧行为。上传蒙版仍验证原图矩形与元数据一致，Worker 随后生成只在有扩展方向向内侵入的软蒙版。自动宽度为短边 8%，限制 64–192；小图不超过短边四分之一。使用 smoothstep 渐变，中心权重 0，原边界与新增区权重 255，不复制原图边缘填充。完整画布始终传给适配器，不按单边蒙版裁切上下文。
+
+seam_refinement 启用时，同一任务第二次调用同一图片模型，用原边界内外各 overlap 宽的软环形蒙版修复；远离接缝和中心不替换。当前协议没有通用 strength 参数，不透传虚构参数。第二阶段失败则任务失败，不静默返回未修复图片。局部颜色匹配仅用原图边缘带统计 RGB 均值，修正不超过每通道 12，按接缝距离淡出；不做全图直方图匹配。没有主体分割，边缘人脸/文字不能保证保护。真实模型接缝效果须另行视觉验收。
+
+技能管理：GET/POST /api/v1/admin/skills，GET/PATCH/DELETE /api/v1/admin/skills/{id}。全部要求 platform_admin；写操作沿用 CSRF/Origin。列表支持 q、enabled、offset、limit（最大 100）。新增默认停用，slug 唯一且不可变（软删除后也保留）。PATCH 提交名称、简介、正文、enabled 和 expected_version；DELETE 查询参数 expected_version。行锁与版本冲突返回 409，软删除后普通查询返回 404。每次变更同事务保存不可变版本与操作记录，版本号递增。正文按文本展示不执行、不渲染原始 HTML。
+
+Skill 执行层扩展（ADR-033）：管理 DTO 新增可空 runtime_key，当前可绑定 image.outpainting；PATCH 省略该字段保留绑定，显式 null 解除绑定。未删除绑定唯一，冲突 409。关联技能停用后新扩图返回 skill_disabled，不默默退回内置模板；删除解除绑定，恢复 Git 默认。输入 API 与生成任务 API 路径保持不变，任务内部 request_snapshot.skill 保存完整版本与提示词快照。详情见 [Skill System](skills.md)。
+
+图片参考生成：`image-editor-options` 增加 `image_to_image` 可用性；已适配的统一图片模型支持时开放上传。`generation-inputs` 的无蒙版输入可用于图片任务，支持既有 size/n 参数，任务快照记录 image_to_image。上传仍限 PNG/JPEG/WebP、80 MiB、参考图最短边 240 像素；保持项目鉴权、幂等和异步任务链路。
+
+### 公开作品
+ADR-038：项目资产 publication GET/PATCH 需要成员鉴权，PATCH 仅作者并校验 CSRF。匿名 `/api/v1/public/users/{user_id}/works` 分页读取显式公开的有效作品，`/works/{asset_id}/content` 每次重新校验可见性。公开 DTO 不包含邮箱、提示词、项目 ID 或对象键。

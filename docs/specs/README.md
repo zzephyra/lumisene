@@ -17,3 +17,7 @@
 实现一个功能前至少阅读其 API、数据约束、状态机和验收项。供应商参数由能力配置决定；本规范中的操作默认值可以通过集中配置调整，但不能绕过硬性安全边界。
 
 品牌展示与兼容性规则见 [Lumi 品牌规范](branding.md)。
+
+Skill 运行时、后台关联和扩展方式见 [Skill System](skills.md)。
+
+- [扩图结构化重构与验收](outpainting-acceptance.md)

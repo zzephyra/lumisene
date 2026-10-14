@@ -303,7 +303,7 @@ Business Service
 
 业务代码 MUST NOT 知道具体 SDK。能力至少区分 `text_generation`、`embedding`、`text_to_video`、`image_to_video`。不得为了统一接口抹平供应商差异。
 
-按 ADR-027，所有图片操作统一使用 text_to_image 指定，所有视频操作统一使用 text_to_video 指定；其他业务按能力指定。操作类型与指定类别分离，局部重绘和图生视频不得单独指定模型。前端展示这个模型，不能改选，也不能在请求里提交模型 ID。前端 MUST NOT 猜测供应商参数。详见 [ADR-019](docs/adr/019-business-model-assignment.md)。
+按 ADR-027，除 ADR-035 专用扩图外，所有图片操作统一使用 text_to_image 指定，所有视频操作统一使用 text_to_video 指定；其他业务按能力指定。操作类型与指定类别分离，局部重绘和图生视频不得单独指定模型。前端展示这个模型，不能改选，也不能在请求里提交模型 ID。前端 MUST NOT 猜测供应商参数。详见 [ADR-019](docs/adr/019-business-model-assignment.md)。
 
 供应商的 429、5xx、超时、网络错误和内部错误 MUST 被分类。结果不明时先查询，禁止盲目再次提交付费请求。
 
@@ -333,7 +333,7 @@ MUST NOT 把普通业务、权限、Outbox、视频轮询或取消包装成 Chai
 
 Gateway MUST 是所有模型调用的唯一出口，包括 LLM、Embedding 和视频生成。
 
-PostgreSQL 中的 `model_configs` 保存服务端允许的模型、能力、参数限制和密钥引用。密钥明文 MUST 只存在于服务端配置，接口 MUST NOT 返回明文。目录写入只允许平台管理员，成员只能读取已启用配置且响应不含 secret_ref。管理页 MUST NOT 发起供应商调用。文本补全和图片生成都由独立进程在数据库事务外调用 OpenAI 兼容适配器；图片字节写入私有对象存储，接口地址和密钥只来自服务端配置。文生视频由独立进程领取 queued 记录，在事务外调用已指定的 text_to_video 适配器，成片写入私有对象存储；提交结果不明时保持 submitting 且不得重发。ADR-026 开放 image_inpaint 局部重绘与 image_to_video 单首帧生成，复用图片/视频任务与 Worker；私有输入持久化并验证项目归属，Pillow 负责图片解码与蒙版转换。
+未提交的 `model-endpoints.yaml` 声明可登记的供应商、中英文别名、模型和支持参数。PostgreSQL 中的 `model_configs` 保存已经登记的模型、能力、参数和密钥引用。密钥明文 MUST 只存在于服务端配置，接口 MUST NOT 返回明文。目录写入只允许平台管理员，成员只能读取已启用配置且响应不含 secret_ref。管理页 MUST NOT 发起供应商调用。文本补全和图片生成都由独立进程在数据库事务外调用 OpenAI 兼容适配器；图片字节写入私有对象存储，接口地址和密钥只来自服务端配置。文生视频由独立进程领取 queued 记录，在事务外调用已指定的 text_to_video 适配器，成片写入私有对象存储；提交结果不明时保持 submitting 且不得重发。ADR-026 开放 image_inpaint 局部重绘与 image_to_video 单首帧生成，复用图片/视频任务与 Worker；私有输入持久化并验证项目归属，Pillow 负责图片解码与蒙版转换。
 
 Generation Service MUST NOT 直接依赖 Polling 或 Webhook。它只消费 Provider 返回的远程观察结果。
 
@@ -445,7 +445,9 @@ Asset
 
 上传 MUST 限制格式、大小、数量和解析超时。外部 URL 导入 MUST 限制协议、目标地址和重定向，防止访问内网。
 
-详见 [ADR-006](docs/adr/006-s3-object-storage.md)。
+配置了七牛时，生成结果和编辑器导出经现有七牛适配器写入七牛；未配置时仍使用 S3 兼容存储。PostgreSQL 记录 `storage_provider` 与 `object_key`，签名 URL 不是永久地址。作品删除策略是系统设置，见 [ADR-036](docs/adr/036-qiniu-generated-assets.md)。
+
+详见 [ADR-006](docs/adr/006-s3-object-storage.md) 与 [ADR-023](docs/adr/023-qiniu-direct-upload.md)。
 
 ## 18. API Architecture
 
@@ -720,3 +722,13 @@ API、Worker、Outbox Dispatcher SHOULD 可以独立启动，并共用同一镜�
 - [运行默认值、当前差距与验收](docs/specs/operations-and-acceptance.md)
 
 总架构不重复维护字段或完整状态表。改变细则中公开契约需要同步其调用方与测试；改变架构边界需要 ADR。用户已明确授权的文档修订可在记录决策后完成，无需为同一授权重复确认。
+
+平台管理员另可管理创作技能目录（新增、编辑、激活、停用、软删除），定义与不可变版本保存于 PostgreSQL，归现有 AI 基础设施目录。见 [ADR-032](docs/adr/032-admin-skills.md)。不自动执行技能、不扩展项目内容访问权限。
+
+扩图使用专用异步 image-out-painting 模型，见 [ADR-035](docs/adr/035-native-outpainting.md)。旧扩图 Skill 分类、蒙版和合成链路已移除；Skill 目录及其他操作保持原边界。
+
+### 统一图像编辑（ADR-037）
+ADR-037 取代 ADR-035 的新任务规则：扩图、局部重绘、参考图指令编辑统一使用 wanx2.1-imageedit；旧原生扩图仅用于已提交任务恢复。文生图及视频模型独立。编辑请求与查询复用已有持久化异步生命周期。
+
+## 公开作品展示
+按 [ADR-038](docs/adr/038-public-works.md)，用户明确公开的生成作品可在匿名个人主页展示。这是项目隔离的有限例外，私有资产与项目元数据仍需原有鉴权。

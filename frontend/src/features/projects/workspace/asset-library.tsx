@@ -1,4 +1,15 @@
-import { AlertCircle, ArrowDownUp, Check, CircleHelp, Eye, Film, Image as ImageIcon, LayoutGrid, List, Plus, RefreshCw, Search, Sparkles, Trash2, Upload } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { useSession } from "../../auth";
+import { MasonryGallery } from "../../../components/gallery/masonry-gallery";
+import { getPublications } from "../../profile/works-api";
+import { PublicationButton } from "../../profile/publication-button";
+import { Columns3 } from "lucide-react";
+import { useGeneratedAssets } from "./use-generated-assets";
+import { assetContentPath } from "../image-generation";
+import { deleteWork } from "../asset-deletion";
+import { userFacingMessage } from "../../../lib/api";
+import { AlertDialog, AlertDialogContent, AlertDialogTitle, AlertDialogDescription } from "../../../components/ui/alert-dialog";
+import { AlertCircle, ArrowDownUp, Check, Eye, Film, Image as ImageIcon, LayoutGrid, List, Plus, RefreshCw, Search, Sparkles, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../../../components/ui/button";
@@ -16,12 +27,13 @@ import "./asset-library.css";
 
 type PreviewTarget = {
   name: string;
-  size: number;
+  size?: number;
   url: string;
   category: UploadCategory;
 };
 
 export function AssetLibrary({
+  projectId,
   assetSearch,
   assetType,
   onGenerate,
@@ -30,6 +42,7 @@ export function AssetLibrary({
   setView,
   view,
 }: {
+  projectId?: string;
   assetSearch: string;
   assetType: string;
   onGenerate: (asset: ReferenceAsset) => void;
@@ -39,6 +52,17 @@ export function AssetLibrary({
   view: string;
 }) {
   const uploads = useUploadAssets();
+  const generated = useGeneratedAssets(projectId);
+  const session = useSession();
+  const publications = useQuery({ queryKey: ["work-publications", session.data?.id, projectId, generated.items.map(item => item.id).join(",")], queryFn: ({ signal }) => getPublications(projectId!, signal), enabled: !!projectId && !!session.data?.id });
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [referenceError, setReferenceError] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [removed, setRemoved] = useState<string[]>([]);
+  useEffect(() => { setRemoved([]); setDeleteTarget(null); setPreview(null); }, [projectId]);
+  const generatedItems = generated.items.filter(item => !removed.includes(item.id) && matches(item.category, item.name, assetType, assetSearch));
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -58,7 +82,7 @@ export function AssetLibrary({
   const savedItems = (uploads.saved.data?.items ?? []).filter(
     (item) => !heldIds.has(item.id) && matches(item.category, item.original_filename, assetType, assetSearch),
   );
-  const empty = localItems.length === 0 && savedItems.length === 0;
+  const empty = localItems.length === 0 && savedItems.length === 0 && generatedItems.length === 0;
 
   useEffect(() => {
     const block = (event: DragEvent) => {
@@ -95,7 +119,7 @@ export function AssetLibrary({
         <div>
           <span className="workspace-eyebrow">YOUR CREATIVE LIBRARY</span>
           <h1>资产</h1>
-          <p>生成结果的全部作品汇总仍未接入。你可以直接上传自己的图片和视频。</p>
+          <p>当前项目的生成作品与上传素材，集中管理和再次创作。</p>
         </div>
         <Button onClick={() => setDialogOpen(true)}>
           <Plus size={16} /> 添加素材
@@ -121,15 +145,16 @@ export function AssetLibrary({
             <Button aria-label="网格视图" aria-pressed={view === "grid"} className={view === "grid" ? "active" : ""} onClick={() => setView("grid")} variant="ghost">
               <LayoutGrid size={17} />
             </Button>
+            <Button aria-label="瀑布流视图" aria-pressed={view === "masonry"} className={view === "masonry" ? "active" : ""} onClick={() => setView("masonry")} variant="ghost"><Columns3 size={17} /></Button>
             <Button aria-label="列表视图" aria-pressed={view === "list"} className={view === "list" ? "active" : ""} onClick={() => setView("list")} variant="ghost">
               <List size={18} />
             </Button>
           </div>
         </div>
       </div>
-      <div className="asset-service-note">
-        <CircleHelp size={15} /> 资产服务尚未接入，当前未查询真实作品。全部作品只是以后的授权汇总，不会把各空间结果在页面上拼起来，也不会共享资料或记忆。
-      </div>
+      {referenceError && <p role="alert">{referenceError}</p>}
+      {generated.loading && <p role="status">正在加载生成作品…</p>}
+      {generated.error && <div role="alert">{generated.error}<Button variant="ghost" onClick={generated.refresh}>重新加载</Button></div>}
       <section
         aria-label="素材工作区"
         className={`workspace-empty asset-workspace ${view}${dragging ? " is-dragover" : ""}`}
@@ -183,7 +208,17 @@ export function AssetLibrary({
             </Button>
           </div>
         ) : (
-          <div className="asset-grid">
+          <MasonryGallery enabled={view === "masonry"} className={view === "masonry" ? "" : "asset-grid"}>
+            {generatedItems.map(item => {
+              const url = assetContentPath(projectId!, item.id);
+              const publication = publications.data?.find(value => value.id === item.id);
+              return <article className="asset-card is-ready" key={`generated-${item.id}`}>
+                <MediaThumb category={item.category} name={item.name} url={url} reveal={false} onPreview={() => setPreview({ name: item.name, url, category: item.category })} />
+                <div className="asset-card-meta"><strong title={item.name}>{item.name}</strong><span>{item.category === "image" ? "AI 生成图片" : "AI 生成视频"}</span></div>
+                {publication && <PublicationButton projectId={projectId!} publication={publication} />}
+                <ReadyActions name={item.name} onGenerate={() => { if (opening.current) return; opening.current = true; setReferenceError(""); void fetch(url, { credentials: "same-origin" }).then(async response => { if (!response.ok) throw new Error("作品读取失败"); const blob = await response.blob(); onGenerate({ id: item.id, name: item.name, url: new URL(url, window.location.origin).href, size: blob.size, category: item.category }); }).catch(() => setReferenceError("作品读取失败，请重试。")).finally(() => { opening.current = false; }); }} onRemove={() => { setDeleteError(""); setDeleteTarget(item.id); }} />
+              </article>;
+            })}
             {localItems.map((item) => (
               <UploadCard
                 item={item}
@@ -209,9 +244,11 @@ export function AssetLibrary({
                 onRemove={() => void uploads.removeSaved(item.id)}
               />
             ))}
-          </div>
+          </MasonryGallery>
         )}
       </section>
+      {publications.isError && <p role="alert">公开状态加载失败。<Button variant="ghost" onClick={() => void publications.refetch()}>重试</Button></p>}
+      <AlertDialog open={deleteTarget !== null} onOpenChange={open => { if (!open && !deleting) setDeleteTarget(null); }}><AlertDialogContent><AlertDialogTitle>删除这件生成作品？</AlertDialogTitle><AlertDialogDescription>作品将从资产和生成记录中隐藏，云端文件按系统设置处理。</AlertDialogDescription>{deleteError && <p role="alert">{deleteError}</p>}<div className="work-delete-actions"><Button variant="outline" disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" disabled={deleting} onClick={() => { if (!projectId || !deleteTarget) return; const id = deleteTarget; setDeleting(true); void deleteWork(projectId, id).then(() => { setRemoved(current => [...current, id]); setDeleteTarget(null); generated.refresh(); }).catch(reason => setDeleteError(userFacingMessage(reason))).finally(() => setDeleting(false)); }}>{deleting ? "正在删除…" : "确认删除"}</Button></div></AlertDialogContent></AlertDialog>
       <AssetUploadDialog onOpenChange={setDialogOpen} onSelect={acceptFiles} open={dialogOpen} />
       {preview ? (
         <Dialog open onOpenChange={(open) => { if (!open) setPreview(null); }}>
@@ -220,7 +257,7 @@ export function AssetLibrary({
             overlayClassName="asset-preview-overlay"
           >
             <DialogTitle className="asset-preview-title">{preview.name}</DialogTitle>
-            <DialogDescription className="asset-preview-size">{formatBytes(preview.size)}</DialogDescription>
+            <DialogDescription className="asset-preview-size">{preview.size === undefined ? "生成作品" : formatBytes(preview.size)}</DialogDescription>
             <PreviewMedia preview={preview} />
           </DialogContent>
         </Dialog>

@@ -2,7 +2,7 @@
 
 ## 1. 状态与适用范围
 
-本文规定目标实现，不代表当前已支持。当前仓库已有 FastAPI 健康检查、配置/异常/日志、数据库会话、身份会话与项目成员闭环，登录页、项目列表和工作台，模型目录的登记、停用和每项业务的模型指定，以及一次显式文本补全。文本补全由独立进程领取 PostgreSQL 中的 queued 记录，在事务外通过 OpenAI 兼容适配器调用；HTTP 请求不等待供应商。密钥和接口地址只在服务端 `MODEL_ENDPOINTS`。没有 Celery Worker、Outbox Dispatcher 或生产部署。图片生成由另一个独立进程领取 queued 记录，在事务外调用 OpenAI 兼容的 images 接口，并把图片字节写入私有对象存储。文生视频由单独进程领取 queued 记录，提交后按 next_poll_at 轮询，成片写入私有对象存储；提交结果不明时不得重发。登录后进入个人创作空间，不必先手动建项目。已有标准空间保持不变。对话持久化、知识库、记忆、跨空间资产汇总和通用资源库尚未实现。管理页不能发起供应商调用。
+本文规定目标实现，不代表当前已支持。当前仓库已有 FastAPI 健康检查、配置/异常/日志、数据库会话、身份会话与项目成员闭环，登录页、项目列表和工作台，模型目录的登记、停用、恢复和每项业务的模型指定，以及一次显式文本补全。文本补全由独立进程领取 PostgreSQL 中的 queued 记录，在事务外通过 OpenAI 兼容适配器调用；HTTP 请求不等待供应商。密钥、接口地址、供应商别名、可登记模型和支持参数只在未提交的 `model-endpoints.yaml`。没有 Celery Worker、Outbox Dispatcher 或生产部署。图片生成由另一个独立进程领取 queued 记录，在事务外调用 OpenAI 兼容的 images 接口，并把图片字节写入私有对象存储。文生视频由单独进程领取 queued 记录，提交后按 next_poll_at 轮询，成片写入私有对象存储；提交结果不明时不得重发。登录后进入个人创作空间，不必先手动建项目。已有标准空间保持不变。对话持久化、知识库、记忆、跨空间资产汇总和通用资源库尚未实现。管理页不能发起供应商调用。
 
 本轮代码已经实现身份与项目闭环。其余代码与目标规范不一致的部分列在第 6 节，不能把测试通过当作未列出的业务已经交付。
 
@@ -34,7 +34,7 @@
 
 ## 3. 部署与启动
 
-本地 docker-compose.yml 启动 PostgreSQL、Redis、Elasticsearch、MinIO、API 和前端开发服务器。开发 Compose 在启动 API 前执行 Alembic upgrade；镜像默认命令只启动进程，生产仍按发布顺序单独迁移。`make test` 执行已有测试，`make run` 仍可在宿主机启动 API。Compose 不包含 Worker 或 Dispatcher，也没有生产持久卷。
+本地 docker-compose.yml 启动 PostgreSQL、Redis、Elasticsearch、MinIO、API、Worker 和前端开发服务器。PostgreSQL、Elasticsearch 和 MinIO 分别使用 `postgres_data`、`elasticsearch_data` 和 `minio_data` 命名卷保存开发数据，普通停止、启动或重建容器不会删除；`docker compose down -v` 会显式删除这些卷。开发 Compose 在启动 API 前执行 Alembic upgrade；镜像默认命令只启动进程，生产仍按发布顺序单独迁移。`make test` 执行已有测试，`make run` 仍可在宿主机启动 API。本地命名卷不等同于生产备份与恢复方案。
 
 业务完成后提供独立 API、Worker、Dispatcher、恢复调度器命令，均使用相同代码版本。队列按 video/ingestion/indexing/chat 分离；批量重建限流，不能饿死对话。Redis 不配置 Celery result backend。
 
@@ -85,7 +85,7 @@ CI 分阶段启用 Ruff/pytest、后端类型检查（固定使用 mypy，接入
 - 当前边界测试扫描整个非 DB infrastructure，会误禁合法 LangChain 适配器；实施 AI 接入时修正测试范围。
 - 身份和项目的外层 Service 已拥有并提交同一个 UoW，项目模块通过 auth Service 读取用户。Worker 工厂的完整生命周期仍未落实。
 - 校验错误不再回显原始输入。登录限流尚未接入；Redis 不可用时登录应返回 503，这项仍待实现。
-- 登录页、项目列表、工作台和模型目录管理页可由前端开发服务器使用，并代理 `/api`。模型目录登记、停用配置，并为每项业务指定一个模型。文本补全和图片生成由独立进程领取 queued 记录后调用 OpenAI 兼容接口；图片字节进入私有对象存储。文生视频由 video-worker 领取，调用已指定的 text_to_video 适配器后把视频字节写入对象存储。Celery、Outbox Dispatcher、RAG、记忆、业务 CI 和生产部署均待实施。项目删除已写入 `project.deleted.v1`，尚无消费者。
+- 登录页、项目列表、工作台和模型目录管理页可由前端开发服务器使用，并代理 `/api`。模型目录登记、停用和恢复配置，并为每项业务指定一个模型。文本补全和图片生成由独立进程领取 queued 记录后调用 OpenAI 兼容接口；图片字节进入私有对象存储。文生视频由 video-worker 领取，调用已指定的 text_to_video 适配器后把视频字节写入对象存储。Celery、Outbox Dispatcher、RAG、记忆、业务 CI 和生产部署均待实施。项目删除已写入 `project.deleted.v1`，尚无消费者。
 
 未列入上面已实现范围的项目仍待后续阶段完成。
 
@@ -114,7 +114,7 @@ CI 分阶段启用 Ruff/pytest、后端类型检查（固定使用 mypy，接入
 
 ### ADR-026：局部重绘与首帧视频
 
-已接入图片编辑器、输入保存、模型能力指定与异步任务。重绘首期支持 OpenAI edits 协议的 `gpt-image-1`、`gpt-image-1-mini`、`gpt-image-1.5`，按 ADR-027 复用 `text_to_image` 图片生成指定，无独立重绘模型配置；另外支持当前 qwen-image-3.0 / pro 的图像编辑及应用层蒙版合成。图生视频支持 Model Gateway 目录中明确列出的 Wan 2.1–2.6 单首帧模型，统一使用 `text_to_video` 指定；当前只开放 5 秒，清晰度选项由后端返回。新模型须验证协议后扩展适配名单。
+已接入图片编辑器、输入保存、模型能力指定与异步任务。重绘首期支持 OpenAI edits 协议的 `gpt-image-1`、`gpt-image-1-mini`、`gpt-image-1.5`，按 ADR-027 复用 `text_to_image` 图片生成指定，无独立重绘模型配置；另外支持当前 qwen-image-2.0（多模态生成接口）、qwen-image-3.0 / pro（images/generations 参考图）的图像编辑及应用层蒙版合成。图生视频统一使用 `text_to_video` 指定。Wan 2.1–2.6 单首帧模型使用 `img_url`；目录声明可接收图片的 `wan3.0-video` 使用 `media` 首帧。当前只开放 5 秒，清晰度选项由后端返回。新模型须验证协议后扩展适配名单。
 
 部署需要 `alembic upgrade head`（0014），同步 Pillow 依赖并重启 API、image-worker、video-worker。image-worker 每小时清理超过 24 小时且没有任何任务引用的输入；先提交 deleted 意图，再删除对象和元数据。失败会记录错误类型并在下轮重试；任务引用的输入保留。
 
@@ -122,3 +122,5 @@ CI 分阶段启用 Ruff/pytest、后端类型检查（固定使用 mypy，接入
 
 
 ADR-027：图片操作统一使用图片生成模型，视频操作统一使用视频生成模型。image_inpaint/image_to_video 仅表示操作类型，不再提供独立指定或新配置类别；历史记录保留且不影响新请求，已排队任务保持原模型快照。Qwen Image 3.0 的选区通过参考图引导，再由应用蒙版合成保证区域外不变，不宣称供应商原生支持 mask。
+
+Skill Layer：image.outpainting 已在既有任务/Worker 链路内接入，支持 Git 默认模板、后台显式绑定、停用准入与不可变任务快照。image.inpainting/video.image_to_video 暂仅预留路由，仍沿用原流程；SceneAnalyzer 尚无生产实现；A/B 分流、自动规划及技能成本/成功率后台尚未实现。本轮验证使用模拟 Provider，不能证明真实模型扩图视觉质量。

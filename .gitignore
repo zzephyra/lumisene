@@ -6,6 +6,8 @@ __pycache__/
 .coverage
 htmlcov/
 .env
+model-endpoints.yaml
+backend/model-endpoints.yaml
 *.pyc
 .DS_Store
 node_modules/

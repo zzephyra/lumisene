@@ -16,6 +16,7 @@ from app.core.logging import get_logger
 from app.infrastructure.ai.domain import (
     MAX_MODEL_CONFIGS,
     MEDIA_ASSIGNMENTS,
+    QWEN_REFERENCE_EDIT_MODELS,
     SECRET_REF_PATTERN,
     AuditAction,
     ModelCapability,
@@ -84,10 +85,28 @@ class ModelCatalog:
     ) -> AdminModelConfig:
         cleaned_provider = clean_provider(provider)
         cleaned_name = clean_model_name(model_name)
-        cleaned_capability = configurable_capability(capability)
+        if (
+            cleaned_name in {"image-out-painting", "wanx2.1-imageedit"}
+            and capability != "image_inpaint"
+        ):
+            raise ValidationError("image-out-painting 只能登记为专用图像编辑模型")
+        cleaned_capability = (
+            "image_inpaint"
+            if cleaned_name in {"image-out-painting", "wanx2.1-imageedit"}
+            and capability == "image_inpaint"
+            else configurable_capability(capability)
+        )
         schema = json_object(parameters_schema, label="Parameters schema")
         cleaned_limits = json_object(limits, label="Limits")
         cleaned_secret = _allowed_secret_ref(secret_ref, self.settings)
+        schema = _catalog_parameters(
+            self.settings,
+            provider=cleaned_provider,
+            model_name=cleaned_name,
+            capability=cleaned_capability,
+            secret_ref=cleaned_secret,
+            parameters=schema,
+        )
         if await self.repository.count_configs(uow.session) >= MAX_MODEL_CONFIGS:
             raise ValidationError("Model catalog is full")
         version = await self.repository.next_version(
@@ -134,27 +153,31 @@ class ModelCatalog:
         config_id: UUID,
         enabled: bool,
     ) -> AdminModelConfig:
-        if enabled is not False:
-            raise ValidationError("Only disabling a model config is allowed")
         config = await self.repository.get_config(uow.session, config_id)
         if config is None:
             raise NotFoundError("Model config was not found")
-        if config.enabled:
-            config.enabled = False
-            config.updated_at = datetime.now(UTC)
-            await self.repository.add_audit(
-                uow.session,
-                _audit(actor_id, config, AuditAction.DISABLED),
-            )
+        if config.enabled == enabled:
+            return _admin(config)
+        config.enabled = enabled
+        config.updated_at = datetime.now(UTC)
+        await self.repository.add_audit(
+            uow.session,
+            _audit(
+                actor_id,
+                config,
+                AuditAction.ENABLED if enabled else AuditAction.DISABLED,
+            ),
+        )
+        if not enabled:
             await self._release_assignment(uow, actor_id, config)
-            await uow.session.flush()
-            await uow.commit()
-            logger.info(
-                "model_config_disabled",
-                actor_id=str(actor_id),
-                model_config_id=str(config.id),
-                config_version=config.config_version,
-            )
+        await uow.session.flush()
+        await uow.commit()
+        logger.info(
+            "model_config_enabled" if enabled else "model_config_disabled",
+            actor_id=str(actor_id),
+            model_config_id=str(config.id),
+            config_version=config.config_version,
+        )
         return _admin(config)
 
     async def list_assignments(self, uow: UnitOfWork) -> list[ModelAssignmentItem]:
@@ -255,6 +278,9 @@ class ModelCatalog:
             _audit(actor_id, config, AuditAction.UNASSIGNED),
         )
 
+    def provider_catalog(self) -> list[dict[str, Any]]:
+        return self.settings.provider_catalog()
+
 
 async def require_assigned(session: AsyncSession, capability: str) -> ModelConfig:
     config = await ModelConfigRepository().assigned_config(
@@ -281,16 +307,36 @@ def _assignment_item(
     )
 
 
+def _catalog_parameters(
+    settings: Settings,
+    *,
+    provider: str,
+    model_name: str,
+    capability: str,
+    secret_ref: str,
+    parameters: dict[str, Any],
+) -> dict[str, Any]:
+    declared = settings.endpoint_models(secret_ref)
+    if declared is None:
+        return parameters
+    if provider != secret_ref:
+        raise ValidationError("Provider must match the configured endpoint")
+    chosen = declared.get(model_name)
+    if chosen is None:
+        raise ValidationError("Model is not listed for this provider")
+    if capability not in chosen.capabilities:
+        raise ValidationError("Capability is not supported by this model")
+    if parameters != chosen.parameters:
+        raise ValidationError("Parameters do not match the provider catalog")
+    return chosen.parameters
+
+
 def _allowed_secret_ref(value: str, settings: Settings) -> str:
     name = value.strip()
-    allowed = _secret_names(settings.model_secret_refs)
+    allowed = settings.configured_secret_refs()
     if not SECRET_REF_PATTERN.fullmatch(name) or name not in allowed:
         raise ValidationError("Secret reference is not configured")
     return name
-
-
-def _secret_names(raw: str) -> frozenset[str]:
-    return frozenset(part.strip() for part in raw.split(",") if part.strip())
 
 
 def _audit(actor_id: UUID, config: ModelConfig, action: AuditAction) -> ModelConfigAudit:
@@ -331,13 +377,16 @@ def _admin(row: ModelConfig) -> AdminModelConfig:
     )
 
 
-INPAINT_MODELS = {
-    "gpt-image-1",
-    "gpt-image-1-mini",
-    "gpt-image-1.5",
-    "qwen-image-3.0",
-    "qwen-image-3.0-pro",
-}
+INPAINT_MODELS = (
+    frozenset(
+        {
+            "gpt-image-1",
+            "gpt-image-1-mini",
+            "gpt-image-1.5",
+        }
+    )
+    | QWEN_REFERENCE_EDIT_MODELS
+)
 VIDEO_RESOLUTIONS = {
     "wan2.2-i2v-flash": ["480P", "720P"],
     "wan2.2-i2v-plus": ["480P", "1080P"],
@@ -349,11 +398,48 @@ VIDEO_RESOLUTIONS = {
 }
 
 
+def video_reference_resolutions(config: ModelConfig, settings: Settings) -> list[str]:
+    """Resolve first-frame support for the assigned model, never another model."""
+    declared = (settings.endpoint_models(config.secret_ref) or {}).get(config.model_name)
+    known = VIDEO_RESOLUTIONS.get(config.model_name)
+    if known is None and not (
+        declared and "text_to_video" in declared.capabilities and "image" in declared.inputs
+    ):
+        return []
+    # The registered version is the runtime contract; YAML only declares input support.
+    choices = config.parameters_schema.get("resolutions", known or [])
+    if not isinstance(choices, list):
+        return []
+    allowed = known or ["480P", "720P", "1080P"]
+    return [item for item in choices if isinstance(item, str) and item in allowed]
+
+
 async def require_editor_model(uow: UnitOfWork, settings: Settings, capability: str) -> ModelConfig:
+    if capability in {"image_inpaint", "image_to_image"}:
+        return await require_outpaint_model(uow, settings)
     config = await require_assigned(uow.session, capability)
     if settings.model_endpoint(config.secret_ref) is None:
         raise ValidationError("该模型的服务端凭据尚未配置")
-    supported = INPAINT_MODELS if capability == "image_inpaint" else VIDEO_RESOLUTIONS
-    if config.model_name not in supported:
+    supported = (
+        config.model_name in INPAINT_MODELS
+        if capability in {"image_inpaint", "image_to_image"}
+        else bool(video_reference_resolutions(config, settings))
+    )
+    if not supported:
         raise ValidationError("统一生成模型暂不支持此操作，请管理员检查图片或视频生成模型")
+    return config
+
+
+async def require_outpaint_model(uow: UnitOfWork, settings: Settings) -> ModelConfig:
+    """Explicit native tool exception; never silently use the assigned image model."""
+    configs = await ModelConfigRepository().list_configs(
+        uow.session, enabled_only=True, capability="image_inpaint"
+    )
+    matches = [row for row in configs if row.model_name == "wanx2.1-imageedit"]
+    providers = {(row.provider, row.secret_ref) for row in matches}
+    if len(providers) != 1:
+        raise ValidationError("请管理员登记并启用唯一供应商的 wanx2.1-imageedit 图像编辑模型")
+    config = max(matches, key=lambda row: row.config_version)
+    if settings.model_endpoint(config.secret_ref) is None:
+        raise ValidationError("扩图模型的服务端凭据尚未配置")
     return config

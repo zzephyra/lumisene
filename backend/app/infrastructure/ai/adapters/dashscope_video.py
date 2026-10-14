@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 from app.core.errors import ProviderError, RateLimitError
 from app.core.errors import TimeoutError as ProviderTimeout
-from app.infrastructure.ai.domain import VIDEO_BYTES_MAX
+from app.infrastructure.ai.domain import VIDEO_BYTES_MAX, WAN3_MEDIA_VIDEO_MODELS
 
 Post = Callable[[str, str, dict[str, Any] | None, dict[str, str], float], tuple[int, object]]
 Fetch = Callable[[str, float], tuple[bytes, str]]
@@ -56,9 +56,12 @@ class DashScopeVideo:
             parameters["size"] = size
         payload = {"model": model, "input": {"prompt": prompt}, "parameters": parameters}
         if image is not None:
-            payload["input"]["img_url"] = (
-                "data:image/png;base64," + base64.b64encode(image).decode()
-            )
+            reference = _image_data_uri(image)
+            if model in WAN3_MEDIA_VIDEO_MODELS:
+                payload["input"]["media"] = [{"type": "first_frame", "url": reference}]
+                parameters["ratio"] = "adaptive"
+            else:
+                payload["input"]["img_url"] = reference
             parameters.pop("size", None)
             parameters["resolution"] = resolution
         status, body = await self._request(
@@ -139,6 +142,16 @@ class DashScopeVideo:
         if not content or len(content) > VIDEO_BYTES_MAX or not _is_mp4(content, content_type):
             raise ProviderError("The model provider returned an empty response")
         return content, "video/mp4"
+
+
+def _image_data_uri(image: bytes) -> str:
+    if image.startswith(b"\xff\xd8\xff"):
+        mime = "image/jpeg"
+    elif len(image) >= 12 and image[:4] == b"RIFF" and image[8:12] == b"WEBP":
+        mime = "image/webp"
+    else:
+        mime = "image/png"
+    return f"data:{mime};base64," + base64.b64encode(image).decode()
 
 
 def _origin(base_url: str) -> str:

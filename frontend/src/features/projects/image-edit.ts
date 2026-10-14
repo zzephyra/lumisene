@@ -1,3 +1,4 @@
+import type { outpaintMetadata } from "./workspace/image-editor/utils/outpaint";
 import { apiRequest, ApiError } from "../../lib/api";
 
 export type InpaintRequest = {
@@ -9,14 +10,6 @@ export type InpaintRequest = {
 export type EraseRequest = {
   image: Blob;
   mask: Blob;
-};
-
-export type OutpaintRequest = {
-  image: Blob;
-  width: number;
-  height: number;
-  imageX: number;
-  imageY: number;
 };
 
 function unavailable(message: string): Promise<never> {
@@ -33,10 +26,6 @@ function unavailable(message: string): Promise<never> {
 
 export function requestErase(_input: EraseRequest): Promise<never> {
   return unavailable("消除接口尚未接入");
-}
-
-export function requestOutpaint(_input: OutpaintRequest): Promise<never> {
-  return unavailable("扩图生成尚未接入");
 }
 
 import type { components } from "../../api/schema";
@@ -60,6 +49,7 @@ export async function getEditorOptions(
         isRecord(row) &&
         typeof row.capability === "string" &&
         typeof row.available === "boolean" &&
+        (row.limits == null || (isRecord(row.limits) && [row.limits.max_width, row.limits.max_height, row.limits.max_pixels].every((value) => typeof value === "number" && Number.isInteger(value) && value > 0))) &&
         (row.model_name === null || typeof row.model_name === "string") &&
         (row.reason === null || typeof row.reason === "string") &&
         (row.duration === null || typeof row.duration === "number") &&
@@ -94,6 +84,8 @@ export async function requestImageAction(
     prompt: string;
     kind: "image" | "video";
     resolution: string;
+    parameters?: Record<string, string | number>;
+    outpaint?: ReturnType<typeof outpaintMetadata>;
   },
   attempt: { inputId: string; key: string },
   signal?: AbortSignal,
@@ -119,7 +111,7 @@ export async function requestImageAction(
     parameters:
       input.kind === "video"
         ? { duration: 5, resolution: input.resolution }
-        : {},
+        : input.outpaint ? { outpaint: input.outpaint } : input.parameters ?? {},
   };
   const result = parseTask(
     await apiRequest({

@@ -1,0 +1,9 @@
+.public-work-card{display:block;position:relative;width:100%;overflow:hidden;border:1px solid var(--color-line);border-radius:16px;background:var(--color-panel);padding:0;cursor:pointer;text-align:left}
+.public-work-card:focus-visible{outline:2px solid var(--color-primary);outline-offset:3px}
+.public-work-card span{display:block;padding:12px 16px;font-size:12px;color:var(--color-muted)}
+.public-work-preview{width:min(1000px,92vw);max-width:92vw;max-height:92dvh;overflow:auto}
+.public-work-preview>img{display:block;max-height:75dvh;max-width:100%;margin:auto;object-fit:contain}
+.public-profile-page{min-height:100dvh;padding:clamp(24px,5vw,80px);background:var(--color-canvas);color:var(--color-ink)}
+.public-profile-page header{margin-bottom:32px}.public-profile-page h1{font-size:32px;margin:16px 0}
+.profile-works-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:20px 0;flex-wrap:wrap}
+.asset-publication-button{font-size:12px;min-height:30px}

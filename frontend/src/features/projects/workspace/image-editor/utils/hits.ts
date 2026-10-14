@@ -4,7 +4,7 @@ import { imageToScreen } from "./coordinates";
 const HANDLE = 16;
 
 export type CropGesture = "move" | "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
-export type OutpaintGesture = "image" | "n" | "s" | "e" | "w";
+export type OutpaintGesture = "n" | "s" | "e" | "w" | "nw" | "ne" | "sw" | "se";
 
 export function cropGesture(x: number, y: number, rect: CropRect, view: ViewTransform): CropGesture | null {
   const corners = {
@@ -42,12 +42,16 @@ export function outpaintGesture(
   x: number,
   y: number,
   frame: OutpaintFrame,
-  imageWidth: number,
-  imageHeight: number,
+  _imageWidth: number,
+  _imageHeight: number,
   view: ViewTransform,
 ): OutpaintGesture | null {
   const left = -frame.imageX;
   const top = -frame.imageY;
+  for (const [edge, cx, cy] of [["nw", left, top], ["ne", left + frame.width, top], ["sw", left, top + frame.height], ["se", left + frame.width, top + frame.height]] as const) {
+    const point = imageToScreen(cx, cy, view);
+    if (Math.hypot(point.x - x, point.y - y) <= HANDLE) return edge;
+  }
   const edges = [
     ["w", imageToScreen(left, top, view), imageToScreen(left, top + frame.height, view)],
     ["e", imageToScreen(left + frame.width, top, view), imageToScreen(left + frame.width, top + frame.height, view)],
@@ -58,15 +62,6 @@ export function outpaintGesture(
     if (distanceToSegment(x, y, start.x, start.y, end.x, end.y) <= HANDLE) {
       return edge;
     }
-  }
-  const origin = imageToScreen(0, 0, view);
-  const opposite = imageToScreen(imageWidth, imageHeight, view);
-  const minX = Math.min(origin.x, opposite.x);
-  const maxX = Math.max(origin.x, opposite.x);
-  const minY = Math.min(origin.y, opposite.y);
-  const maxY = Math.max(origin.y, opposite.y);
-  if (x >= minX && x <= maxX && y >= minY && y <= maxY) {
-    return "image";
   }
   return null;
 }

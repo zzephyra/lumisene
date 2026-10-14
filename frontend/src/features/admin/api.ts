@@ -33,6 +33,22 @@ export type CreateModelConfigInput = {
   secret_ref: string;
 };
 
+export type ProviderModelOption = {
+  name: string;
+  alias_zh: string;
+  alias_en: string;
+  capabilities: string[];
+  inputs: string[];
+  parameters: Record<string, Array<string | number>>;
+};
+
+export type ProviderCatalogItem = {
+  id: string;
+  alias_zh: string;
+  alias_en: string;
+  models: ProviderModelOption[];
+};
+
 function invalidResponse(): ApiError {
   return new ApiError({
     status: 500,
@@ -83,6 +99,87 @@ export async function listModelConfigs(signal?: AbortSignal): Promise<ModelConfi
     throw invalidResponse();
   }
   return items as ModelConfig[];
+}
+
+function parseChoices(value: unknown): Array<string | number> | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+  const choices: Array<string | number> = [];
+  for (const item of value) {
+    if (typeof item === "string" || typeof item === "number") {
+      choices.push(item);
+      continue;
+    }
+    return null;
+  }
+  return choices;
+}
+
+function parseProviderModel(value: unknown): ProviderModelOption | null {
+  if (
+    !isRecord(value) ||
+    typeof value.name !== "string" ||
+    typeof value.alias_zh !== "string" ||
+    typeof value.alias_en !== "string" ||
+    !Array.isArray(value.capabilities) ||
+    !value.capabilities.every((item) => typeof item === "string") ||
+    !Array.isArray(value.inputs) ||
+    !value.inputs.every((item) => typeof item === "string") ||
+    !isRecord(value.parameters)
+  ) {
+    return null;
+  }
+  const parameters: Record<string, Array<string | number>> = {};
+  for (const [key, item] of Object.entries(value.parameters)) {
+    const choices = parseChoices(item);
+    if (!choices) {
+      return null;
+    }
+    parameters[key] = choices;
+  }
+  return {
+    name: value.name,
+    alias_zh: value.alias_zh,
+    alias_en: value.alias_en,
+    capabilities: value.capabilities,
+    inputs: value.inputs,
+    parameters,
+  };
+}
+
+function parseProvider(value: unknown): ProviderCatalogItem | null {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.alias_zh !== "string" ||
+    typeof value.alias_en !== "string" ||
+    !Array.isArray(value.models)
+  ) {
+    return null;
+  }
+  const models = value.models.map(parseProviderModel);
+  if (models.some((item) => item === null)) {
+    return null;
+  }
+  return {
+    id: value.id,
+    alias_zh: value.alias_zh,
+    alias_en: value.alias_en,
+    models: models as ProviderModelOption[],
+  };
+}
+
+export async function listModelCatalog(signal?: AbortSignal): Promise<ProviderCatalogItem[]> {
+  const body = await apiRequest({ path: "/api/v1/admin/model-catalog", signal });
+  if (!isRecord(body) || !Array.isArray(body.items)) {
+    throw invalidResponse();
+  }
+  const items = body.items.map(parseProvider);
+  if (items.some((item) => item === null)) {
+    throw invalidResponse();
+  }
+  return items as ProviderCatalogItem[];
 }
 
 export async function createModelConfig(input: CreateModelConfigInput): Promise<ModelConfig> {
@@ -147,10 +244,18 @@ export async function clearModelAssignment(capability: string): Promise<void> {
 }
 
 export async function disableModelConfig(configId: string): Promise<ModelConfig> {
+  return setModelConfigEnabled(configId, false);
+}
+
+export async function enableModelConfig(configId: string): Promise<ModelConfig> {
+  return setModelConfigEnabled(configId, true);
+}
+
+async function setModelConfigEnabled(configId: string, enabled: boolean): Promise<ModelConfig> {
   const body = await apiRequest({
     path: `/api/v1/admin/model-configs/${configId}`,
     method: "PATCH",
-    body: { enabled: false },
+    body: { enabled },
     csrf: true,
   });
   const config = parseConfig(body);

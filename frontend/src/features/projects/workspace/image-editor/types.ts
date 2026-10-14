@@ -40,6 +40,7 @@ export type ViewTransform = {
   panX: number;
   panY: number;
   rotation: number;
+  padBottom?: number;
 };
 
 export type EditorDocument = {

@@ -34,6 +34,14 @@ class ProjectRepository:
         )
         return (await session.execute(stmt)).scalar_one_or_none()
 
+    async def visible_project_ids(self, session: AsyncSession, user_id: UUID) -> list[UUID]:
+        stmt = (
+            select(Project.id)
+            .join(ProjectMember, ProjectMember.project_id == Project.id)
+            .where(ProjectMember.user_id == user_id, Project.deleted_at.is_(None))
+        )
+        return list(await session.scalars(stmt))
+
     async def list_for_user(
         self,
         session: AsyncSession,

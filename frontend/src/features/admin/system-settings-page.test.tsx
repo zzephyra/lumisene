@@ -1,0 +1,25 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { expect, it, vi } from "vitest";
+import { SystemSettingsScreen } from "./system-settings-page";
+import { readSystemSettings, saveSystemSettings } from "./system-settings-api";
+vi.mock("../auth", () => ({ useSession: () => ({ data: { id: "admin" } }) }));
+vi.mock("./system-settings-api", () => ({ readSystemSettings: vi.fn(), saveSystemSettings: vi.fn() }));
+it("resets edits and saves selected policy with its revision", async () => {
+  vi.mocked(readSystemSettings).mockResolvedValue({ schema_version: 1, revision: 3, assets: { deletion_policy: "retain_cloud_file" } });
+  vi.mocked(saveSystemSettings).mockResolvedValue({ schema_version: 1, revision: 4, assets: { deletion_policy: "delete_cloud_file" } });
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SystemSettingsScreen /></QueryClientProvider>);
+  const select = await screen.findByLabelText(/作品删除策略/);
+  expect(screen.getByRole("button", { name: "保存更改" })).toBeDisabled();
+  await userEvent.click(select);
+  await userEvent.click(screen.getByRole("menuitemradio", { name: "同步清理云端文件" }));
+  await userEvent.click(screen.getByRole("button", { name: "重置更改" }));
+  expect(select).toHaveTextContent("保留云端文件");
+  await userEvent.click(select);
+  await userEvent.click(screen.getByRole("menuitemradio", { name: "同步清理云端文件" }));
+  await userEvent.click(screen.getByRole("button", { name: "保存更改" }));
+  await waitFor(() => expect(saveSystemSettings).toHaveBeenCalledWith(3, "delete_cloud_file"));
+  await waitFor(() => expect(screen.getByRole("button", { name: "保存更改" })).toBeDisabled());
+  expect(select).toHaveTextContent("同步清理云端文件");
+});

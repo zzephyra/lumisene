@@ -20,6 +20,7 @@ from app.infrastructure.ai.schemas import (
     DisableModelConfigRequest,
     ModelAssignmentItem,
     ModelAssignmentList,
+    ProviderCatalogList,
     PublicModelConfig,
     PublicModelConfigList,
 )
@@ -99,6 +100,16 @@ async def clear_model_assignment(
 ) -> Response:
     await catalog.clear(uow, actor_id=principal.user_id, capability=capability)
     return Response(status_code=204)
+
+
+@router.get("/admin/model-catalog", response_model=ProviderCatalogList)
+async def list_model_catalog(
+    response: Response,
+    _: PlatformAdminReadDep,
+    catalog: ModelCatalogDep,
+) -> ProviderCatalogList:
+    no_store(response)
+    return ProviderCatalogList(items=catalog.provider_catalog())
 
 
 @router.get("/admin/model-configs", response_model=AdminModelConfigList)

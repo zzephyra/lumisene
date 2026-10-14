@@ -2,22 +2,25 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
 import { getMe } from "../auth/api";
-import { createModelConfig, disableModelConfig, listModelAssignments, listModelConfigs } from "./api";
-import { AssignmentScreen, CatalogScreen, ModelAdminPage } from "./model-admin-page";
+import { assignModel, clearModelAssignment, createModelConfig, disableModelConfig, enableModelConfig, listModelAssignments, listModelCatalog, listModelConfigs } from "./api";
+import { ASSIGNMENT_TOAST_MS, AssignmentScreen, CatalogScreen, ModelAdminPage } from "./model-admin-page";
 
+import { ModelDetailsScreen } from "./model-details-page";
 import { AdminOverview, AdminModuleScreen } from "./admin-overview";
 
 vi.mock("./api", () => ({
   listModelConfigs: vi.fn(),
+  listModelCatalog: vi.fn(),
   listModelAssignments: vi.fn(),
   assignModel: vi.fn(),
   clearModelAssignment: vi.fn(),
   createModelConfig: vi.fn(),
   disableModelConfig: vi.fn(),
+  enableModelConfig: vi.fn(),
   modelAdminQueryKey: ["admin", "model-configs"],
   modelAssignmentQueryKey: ["admin", "model-assignments"],
 }));
@@ -40,6 +43,7 @@ function renderPage(path = "/admin/models") {
             <Route index element={<AdminOverview />} />
             <Route element={<AdminModuleScreen />} path=":module" />
             <Route element={<CatalogScreen />} path="models" />
+            <Route element={<ModelDetailsScreen />} path="models/details" />
             <Route element={<AssignmentScreen />} path="assignments" />
           </Route>
           <Route element={<h1>工作台</h1>} path="/studio" />
@@ -50,17 +54,47 @@ function renderPage(path = "/admin/models") {
 }
 
 describe("model admin page", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     vi.mocked(listModelConfigs).mockReset();
+    vi.mocked(listModelCatalog).mockReset();
+    vi.mocked(listModelCatalog).mockResolvedValue([]);
     vi.mocked(listModelAssignments).mockReset();
     vi.mocked(listModelAssignments).mockResolvedValue([]);
+    vi.mocked(assignModel).mockReset();
+    vi.mocked(clearModelAssignment).mockReset();
     vi.mocked(createModelConfig).mockReset();
     vi.mocked(disableModelConfig).mockReset();
+    vi.mocked(enableModelConfig).mockReset();
     vi.mocked(getMe).mockResolvedValue({
       id: "user-1",
       email: "owner@example.com",
       platform_admin: true,
     });
+  });
+
+  it("registers a model from details and then offers disable and enable for the same version", async () => {
+    const config = { id: "video-1", provider: "wan", model_name: "wan3.0-video", capability: "text_to_video", config_version: 1, parameters_schema: {}, limits: {}, secret_ref: "wan", enabled: true };
+    vi.mocked(listModelConfigs).mockResolvedValue([]);
+    vi.mocked(listModelCatalog).mockResolvedValue([{ id: "wan", alias_zh: "万相", alias_en: "Wan", models: [{ name: "wan3.0-video", alias_zh: "万相 3.0", alias_en: "Wan 3", capabilities: ["text_to_video"], inputs: ["text", "image"], parameters: { durations: [5, 10] } }] }]);
+    vi.mocked(createModelConfig).mockImplementation(async () => { vi.mocked(listModelConfigs).mockResolvedValue([config]); return config; });
+    vi.mocked(disableModelConfig).mockImplementation(async () => { vi.mocked(listModelConfigs).mockResolvedValue([{ ...config, enabled: false }]); return { ...config, enabled: false }; });
+    vi.mocked(enableModelConfig).mockImplementation(async () => { vi.mocked(listModelConfigs).mockResolvedValue([config]); return config; });
+    renderPage("/admin/models/details?provider=wan&model=wan3.0-video");
+    expect(await screen.findByRole("heading", { name: "图生视频" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "文生视频" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "登记模型" }));
+    expect(createModelConfig).toHaveBeenCalledWith(expect.objectContaining({ provider: "wan", capability: "text_to_video" }));
+    await userEvent.click(await screen.findByRole("button", { name: "停用" }));
+    expect(disableModelConfig).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "确认停用" }));
+    expect(disableModelConfig).toHaveBeenCalledWith("video-1");
+    await userEvent.click(await screen.findByRole("button", { name: "启用" }));
+    expect(enableModelConfig).toHaveBeenCalledWith("video-1");
+    expect(await screen.findByRole("button", { name: "停用" })).toBeInTheDocument();
   });
 
   it("shows real empty catalog counts and navigates to the planned moderation module", async () => {
@@ -103,15 +137,32 @@ describe("model admin page", () => {
 
   it("submits only the catalog fields", async () => {
     vi.mocked(listModelConfigs).mockResolvedValue([]);
+    vi.mocked(listModelCatalog).mockResolvedValue([
+      {
+        id: "qianwen",
+        alias_zh: "千问",
+        alias_en: "Qianwen",
+        models: [
+          {
+            name: "qwen-plus",
+            alias_zh: "千问 Plus",
+            alias_en: "Qwen Plus",
+            capabilities: ["text_generation", "embedding"],
+            inputs: [],
+            parameters: {},
+          },
+        ],
+      },
+    ]);
     vi.mocked(createModelConfig).mockResolvedValue({
       id: "config-1",
-      provider: "openai",
-      model_name: "gpt-4o",
-      capability: "text_to_video",
+      provider: "qianwen",
+      model_name: "qwen-plus",
+      capability: "text_generation",
       config_version: 1,
       parameters_schema: {},
       limits: {},
-      secret_ref: "openai_api_key",
+      secret_ref: "qianwen",
       enabled: true,
     });
     renderPage("/admin/models");
@@ -119,13 +170,15 @@ describe("model admin page", () => {
     expect(screen.queryByLabelText("供应商")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "登记模型" }));
     expect(await screen.findByRole("heading", { name: "登记模型" })).toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText("供应商"), "openai");
-    await userEvent.type(screen.getByLabelText("模型名称"), "gpt-4o");
-    await userEvent.click(screen.getByLabelText("能力"));
-    await userEvent.click(screen.getByRole("menuitem", { name: "视频生成" }));
-    await userEvent.type(screen.getByLabelText("密钥名称"), "openai_api_key");
+    expect(await screen.findByLabelText("供应商")).toHaveTextContent("千问 · qianwen");
+    expect(screen.queryByLabelText("密钥名称")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("能力")).not.toBeInTheDocument();
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("文本生成")).toBeInTheDocument();
+    expect(within(dialog).getByText("向量")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/密钥名称与供应商相同/)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "确认登记" }));
-    await waitFor(() => expect(createModelConfig).toHaveBeenCalled());
+    await waitFor(() => expect(createModelConfig).toHaveBeenCalledTimes(2));
     const payload = vi.mocked(createModelConfig).mock.calls[0][0];
     expect(Object.keys(payload).sort()).toEqual([
       "capability",
@@ -136,7 +189,14 @@ describe("model admin page", () => {
       "secret_ref",
     ]);
     expect(payload).not.toHaveProperty("api_key");
-    expect(payload.secret_ref).toBe("openai_api_key");
+    expect(payload).toMatchObject({
+      provider: "qianwen",
+      model_name: "qwen-plus",
+      capability: "text_generation",
+      parameters_schema: {},
+      secret_ref: "qianwen",
+    });
+    expect(vi.mocked(createModelConfig).mock.calls[1][0].capability).toBe("embedding");
   });
 
   it("disables a published config from the server list", async () => {
@@ -173,6 +233,43 @@ describe("model admin page", () => {
     await userEvent.click(screen.getByRole("button", { name: "确认停用" }));
     await waitFor(() => expect(disableModelConfig).toHaveBeenCalled());
     expect(vi.mocked(disableModelConfig).mock.calls[0][0]).toBe("config-1");
+  });
+
+  it("restores a disabled config without treating it as permanent", async () => {
+    vi.mocked(listModelConfigs).mockResolvedValue([
+      {
+        id: "config-1",
+        provider: "openai",
+        model_name: "gpt-4o",
+        capability: "text_generation",
+        config_version: 1,
+        parameters_schema: {},
+        limits: {},
+        secret_ref: "openai_api_key",
+        enabled: false,
+      },
+    ]);
+    vi.mocked(enableModelConfig).mockResolvedValue({
+      id: "config-1",
+      provider: "openai",
+      model_name: "gpt-4o",
+      capability: "text_generation",
+      config_version: 1,
+      parameters_schema: {},
+      limits: {},
+      secret_ref: "openai_api_key",
+      enabled: true,
+    });
+    renderPage("/admin/models");
+    await screen.findByRole("heading", { name: "Models" });
+    await userEvent.click(screen.getByRole("button", { name: "gpt-4o 版本 1 操作" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "恢复 gpt-4o 版本 1" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("停用时取消的业务指定不会自动恢复");
+    expect(enableModelConfig).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "确认恢复" }));
+    await waitFor(() => expect(enableModelConfig).toHaveBeenCalled());
+    expect(vi.mocked(enableModelConfig).mock.calls[0][0]).toBe("config-1");
+    expect(disableModelConfig).not.toHaveBeenCalled();
   });
 
   it("shows only models of the same capability in a business", async () => {
@@ -215,12 +312,68 @@ describe("model admin page", () => {
     expect(await screen.findByRole("heading", { name: "业务指定" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "登记模型" })).not.toBeInTheDocument();
     const user = userEvent.setup();
-    await user.click(await screen.findByLabelText("视频生成"));
+    await user.click(await screen.findByLabelText("视频"));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["qianwen · video-a"]);
     await user.keyboard("{Escape}");
     await user.click(screen.getByLabelText("文本生成"));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["qianwen · qwen-plus"]);
   });
+
+  it("shows success and failure after changing a business assignment", async () => {
+    vi.mocked(listModelConfigs).mockResolvedValue([
+      {
+        id: "text-1",
+        provider: "qianwen",
+        model_name: "qwen-plus",
+        capability: "text_generation",
+        config_version: 1,
+        parameters_schema: {},
+        limits: {},
+        secret_ref: "qianwen",
+        enabled: true,
+      },
+    ]);
+    vi.mocked(listModelAssignments).mockResolvedValue([
+      {
+        capability: "text_generation",
+        model_config_id: "text-1",
+        provider: "qianwen",
+        model_name: "qwen-plus",
+        config_version: 1,
+      },
+    ]);
+    vi.mocked(clearModelAssignment).mockResolvedValue(undefined);
+    vi.mocked(assignModel)
+      .mockRejectedValueOnce(new Error("rejected"))
+      .mockResolvedValueOnce({
+        capability: "text_generation",
+        model_config_id: "text-1",
+        provider: "qianwen",
+        model_name: "qwen-plus",
+        config_version: 1,
+      });
+    renderPage("/admin/assignments");
+    await screen.findByRole("button", { name: "取消指定" });
+    const assign = screen.getAllByRole("button", { name: "设为当前模型" }).find((button) => !button.hasAttribute("disabled"));
+    if (!assign) {
+      throw new Error("expected an enabled assignment button");
+    }
+    await userEvent.click(assign);
+    const failure = await screen.findByText("指定失败：无法连接服务器，请重试");
+    expect(failure).toHaveClass("admin-toast");
+    const assignAgain = screen.getAllByRole("button", { name: "设为当前模型" }).find((button) => !button.hasAttribute("disabled"));
+    if (!assignAgain) {
+      throw new Error("expected an enabled assignment button");
+    }
+    await userEvent.click(assignAgain);
+    expect(await screen.findByText("已将文本生成指定为 qianwen · qwen-plus")).toHaveClass("admin-toast");
+    expect(screen.queryByText("指定失败：无法连接服务器，请重试")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "取消指定" }));
+    expect(await screen.findByText("已取消文本生成的指定")).toBeInTheDocument();
+    expect(clearModelAssignment).toHaveBeenCalledWith("text_generation");
+    await new Promise((resolve) => setTimeout(resolve, ASSIGNMENT_TOAST_MS + 50));
+    expect(screen.queryByText("已取消文本生成的指定")).not.toBeInTheDocument();
+  }, 10000);
 
   it("filters the catalog by capability tag and model name", async () => {
     vi.mocked(listModelConfigs).mockResolvedValue([
@@ -254,7 +407,7 @@ describe("model admin page", () => {
     expect(screen.queryByText("video-a")).not.toBeInTheDocument();
     await userEvent.clear(screen.getByLabelText("搜索模型名称"));
     await userEvent.click(screen.getByRole("button", { name: "能力筛选" }));
-    await userEvent.click(screen.getByRole("menuitem", { name: "视频生成" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "视频" }));
     expect(screen.getByText("video-a")).toBeInTheDocument();
     expect(screen.queryByText("qwen-plus")).not.toBeInTheDocument();
   });
@@ -282,23 +435,58 @@ describe("model admin page", () => {
     expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
   });
 
-  it("keeps advanced validation and sends no request for invalid JSON", async () => {
+  it("registers the selected model's declared parameters", async () => {
     vi.mocked(listModelConfigs).mockResolvedValue([]);
+    vi.mocked(listModelCatalog).mockResolvedValue([
+      {
+        id: "wan_video",
+        alias_zh: "万相",
+        alias_en: "Wan",
+        models: [
+          {
+            name: "wan2.2-t2v-plus",
+            alias_zh: "万相 2.2",
+            alias_en: "Wan 2.2",
+            capabilities: ["text_to_video"],
+            inputs: ["text", "image", "video", "audio"],
+            parameters: { resolutions: ["480P", "1080P"] },
+          },
+          {
+            name: "wan2.1-i2v-turbo",
+            alias_zh: "万相 2.1",
+            alias_en: "Wan 2.1",
+            capabilities: ["text_to_video"],
+            inputs: [],
+            parameters: { resolutions: ["480P"] },
+          },
+        ],
+      },
+    ]);
+    vi.mocked(createModelConfig).mockResolvedValue({
+      id: "config-1",
+      provider: "wan_video",
+      model_name: "wan2.1-i2v-turbo",
+      capability: "text_to_video",
+      config_version: 1,
+      parameters_schema: { resolutions: ["480P"] },
+      limits: {},
+      secret_ref: "wan_video",
+      enabled: true,
+    });
     renderPage();
     await userEvent.click(await screen.findByRole("button", { name: "登记模型" }));
-    const form = screen.getByRole("dialog");
-    expect(form.querySelector("details")).not.toHaveAttribute("open");
-    await userEvent.type(screen.getByLabelText("供应商"), "openai");
-    await userEvent.type(screen.getByLabelText("模型名称"), "example");
-    await userEvent.type(screen.getByLabelText("密钥名称"), "server_key");
-    await userEvent.click(screen.getByText("高级配置"));
-    await userEvent.clear(screen.getByLabelText("参数说明"));
-    await userEvent.type(screen.getByLabelText("参数说明"), "invalid");
+    expect(await screen.findByText("输入：文本、图片、视频、音频")).toBeInTheDocument();
+    expect(await screen.findByText("清晰度：480P、1080P")).toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText("模型"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "万相 2.1 · wan2.1-i2v-turbo" }));
+    expect(screen.getByText("清晰度：480P")).toBeInTheDocument();
+    expect(screen.queryByText(/输入：/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/1080P/)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "确认登记" }));
-    expect(screen.getByText("参数说明必须是 JSON 对象")).toBeInTheDocument();
-    expect(createModelConfig).not.toHaveBeenCalled();
-    await userEvent.click(within(form).getByRole("button", { name: "取消" }));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(createModelConfig).toHaveBeenCalled());
+    expect(vi.mocked(createModelConfig).mock.calls[0][0].parameters_schema).toEqual({
+      resolutions: ["480P"],
+    });
   });
 
   it("shows a skeleton while loading and a retry after failure", async () => {

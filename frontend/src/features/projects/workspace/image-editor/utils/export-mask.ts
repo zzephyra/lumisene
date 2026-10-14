@@ -1,4 +1,4 @@
-import type { Stroke } from "../types";
+import type { CropRect, Stroke } from "../types";
 
 function trace(context: CanvasRenderingContext2D, stroke: Stroke) {
   const [startX, startY] = stroke.points;
@@ -22,7 +22,12 @@ function trace(context: CanvasRenderingContext2D, stroke: Stroke) {
   }
 }
 
-export function renderMask(width: number, height: number, strokes: Stroke[]): HTMLCanvasElement {
+export function renderMask(
+  width: number,
+  height: number,
+  strokes: Stroke[],
+  selection?: CropRect | null,
+): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(width));
   canvas.height = Math.max(1, Math.round(height));
@@ -32,6 +37,10 @@ export function renderMask(width: number, height: number, strokes: Stroke[]): HT
   }
   context.fillStyle = "#000";
   context.fillRect(0, 0, canvas.width, canvas.height);
+  if (selection && selection.width > 0 && selection.height > 0) {
+    context.fillStyle = "#fff";
+    context.fillRect(selection.x, selection.y, selection.width, selection.height);
+  }
   for (const stroke of strokes) {
     context.save();
     context.globalCompositeOperation = "source-over";
@@ -42,8 +51,13 @@ export function renderMask(width: number, height: number, strokes: Stroke[]): HT
   return canvas;
 }
 
-export function exportMask(width: number, height: number, strokes: Stroke[]): Promise<Blob> {
-  const canvas = renderMask(width, height, strokes);
+export function exportMask(
+  width: number,
+  height: number,
+  strokes: Stroke[],
+  selection?: CropRect | null,
+): Promise<Blob> {
+  const canvas = renderMask(width, height, strokes, selection);
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (!blob) {

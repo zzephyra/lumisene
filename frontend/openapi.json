@@ -1312,6 +1312,326 @@
         }
       }
     },
+    "/api/v1/admin/skills": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "List Skills",
+        "operationId": "list_skills_api_v1_admin_skills_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 120,
+              "default": "",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "enabled",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enabled"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Create Skill",
+        "operationId": "create_skill_api_v1_admin_skills_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/skills/{skill_id}": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Get Skill",
+        "operationId": "get_skill_api_v1_admin_skills__skill_id__get",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Skill Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Update Skill",
+        "operationId": "update_skill_api_v1_admin_skills__skill_id__patch",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Skill Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Delete Skill",
+        "operationId": "delete_skill_api_v1_admin_skills__skill_id__delete",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Skill Id"
+            }
+          },
+          {
+            "name": "expected_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Expected Version"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/system-settings": {
+      "get": {
+        "tags": [
+          "system-settings"
+        ],
+        "summary": "Read System Settings",
+        "operationId": "read_system_settings_api_v1_admin_system_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "system-settings"
+        ],
+        "summary": "Update System Settings",
+        "operationId": "update_system_settings_api_v1_admin_system_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemSettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/csrf": {
       "get": {
         "tags": [
@@ -2043,6 +2363,27 @@
         }
       }
     },
+    "/api/v1/admin/model-catalog": {
+      "get": {
+        "tags": [
+          "models"
+        ],
+        "summary": "List Model Catalog",
+        "operationId": "list_model_catalog_api_v1_admin_model_catalog_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCatalogList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/model-configs": {
       "get": {
         "tags": [
@@ -2355,6 +2696,17 @@
               ],
               "title": "Kind"
             }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
           }
         ],
         "responses": {
@@ -2554,6 +2906,110 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}/assets/{asset_id}/deletion": {
+      "post": {
+        "tags": [
+          "generation"
+        ],
+        "summary": "Delete Project Asset",
+        "operationId": "delete_project_asset_api_v1_projects__project_id__assets__asset_id__deletion_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Asset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetDeletionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "generation"
+        ],
+        "summary": "Read Asset Deletion",
+        "operationId": "read_asset_deletion_api_v1_projects__project_id__assets__asset_id__deletion_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Asset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetDeletionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/projects/{project_id}/generation-inputs": {
       "post": {
         "tags": [
@@ -2638,6 +3094,336 @@
                   },
                   "title": "Response Image Editor Options Api V1 Projects  Project Id  Image Editor Options Get"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/generation-tasks/{task_id}/outpaint-debug": {
+      "get": {
+        "tags": [
+          "generation"
+        ],
+        "summary": "Outpaint Debug Manifest",
+        "operationId": "outpaint_debug_manifest_api_v1_projects__project_id__generation_tasks__task_id__outpaint_debug_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Outpaint Debug Manifest Api V1 Projects  Project Id  Generation Tasks  Task Id  Outpaint Debug Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/assets/publication": {
+      "get": {
+        "tags": [
+          "works"
+        ],
+        "summary": "Publications",
+        "operationId": "publications_api_v1_projects__project_id__assets_publication_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WorkPublication"
+                  },
+                  "title": "Response Publications Api V1 Projects  Project Id  Assets Publication Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/assets/{asset_id}/publication": {
+      "patch": {
+        "tags": [
+          "works"
+        ],
+        "summary": "Publish",
+        "operationId": "publish_api_v1_projects__project_id__assets__asset_id__publication_patch",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Asset Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkPublication"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/public/users/{user_id}/works": {
+      "get": {
+        "tags": [
+          "works"
+        ],
+        "summary": "Public Works",
+        "operationId": "public_works_api_v1_public_users__user_id__works_get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "image",
+                    "video"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PublicWork"
+                  },
+                  "title": "Response Public Works Api V1 Public Users  User Id  Works Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/public/users/{user_id}/works/{asset_id}/content": {
+      "get": {
+        "tags": [
+          "works"
+        ],
+        "summary": "Public Content",
+        "operationId": "public_content_api_v1_public_users__user_id__works__asset_id__content_get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Asset Id"
+            }
+          },
+          {
+            "name": "Range",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Range"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -3949,6 +4735,77 @@
         ],
         "title": "AdminUserList"
       },
+      "AssetDeletionResponse": {
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Asset Id"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "policy": {
+            "type": "string",
+            "enum": [
+              "retain_cloud_file",
+              "delete_cloud_file"
+            ],
+            "title": "Policy"
+          },
+          "purge_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "failed",
+                  "purged"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purge Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "asset_id",
+          "deleted_at",
+          "policy",
+          "purge_status"
+        ],
+        "title": "AssetDeletionResponse"
+      },
+      "AssetSettings": {
+        "properties": {
+          "deletion_policy": {
+            "type": "string",
+            "enum": [
+              "retain_cloud_file",
+              "delete_cloud_file"
+            ],
+            "title": "Deletion Policy"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "deletion_policy"
+        ],
+        "title": "AssetSettings"
+      },
       "AssignModelRequest": {
         "properties": {
           "model_config_id": {
@@ -4229,7 +5086,6 @@
         "properties": {
           "enabled": {
             "type": "boolean",
-            "const": false,
             "title": "Enabled"
           }
         },
@@ -4489,8 +5345,41 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "ImageEditLimits": {
+        "properties": {
+          "max_width": {
+            "type": "integer",
+            "title": "Max Width"
+          },
+          "max_height": {
+            "type": "integer",
+            "title": "Max Height"
+          },
+          "max_pixels": {
+            "type": "integer",
+            "title": "Max Pixels"
+          }
+        },
+        "type": "object",
+        "required": [
+          "max_width",
+          "max_height",
+          "max_pixels"
+        ],
+        "title": "ImageEditLimits"
+      },
       "ImageEditorOption": {
         "properties": {
+          "limits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageEditLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "capability": {
             "type": "string",
             "title": "Capability"
@@ -4862,6 +5751,98 @@
         ],
         "title": "ProjectRole"
       },
+      "ProviderCatalogItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "alias_zh": {
+            "type": "string",
+            "title": "Alias Zh"
+          },
+          "alias_en": {
+            "type": "string",
+            "title": "Alias En"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderModelOption"
+            },
+            "type": "array",
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "alias_zh",
+          "alias_en",
+          "models"
+        ],
+        "title": "ProviderCatalogItem"
+      },
+      "ProviderCatalogList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCatalogItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ProviderCatalogList"
+      },
+      "ProviderModelOption": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "alias_zh": {
+            "type": "string",
+            "title": "Alias Zh"
+          },
+          "alias_en": {
+            "type": "string",
+            "title": "Alias En"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capabilities"
+          },
+          "inputs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Inputs",
+            "default": []
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "alias_zh",
+          "alias_en",
+          "capabilities",
+          "parameters"
+        ],
+        "title": "ProviderModelOption"
+      },
       "PublicModelConfig": {
         "properties": {
           "id": {
@@ -4923,6 +5904,72 @@
           "items"
         ],
         "title": "PublicModelConfigList"
+      },
+      "PublicWork": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "image",
+              "video"
+            ],
+            "title": "Kind"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Published At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "width",
+          "height",
+          "published_at"
+        ],
+        "title": "PublicWork"
+      },
+      "PublicationRequest": {
+        "properties": {
+          "public": {
+            "type": "boolean",
+            "title": "Public"
+          }
+        },
+        "type": "object",
+        "required": [
+          "public"
+        ],
+        "title": "PublicationRequest"
       },
       "RenderRequest": {
         "properties": {
@@ -5073,6 +6120,195 @@
         ],
         "title": "SessionRevoke"
       },
+      "SkillCreate": {
+        "properties": {
+          "runtime_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "image.outpainting"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Key"
+          },
+          "slug": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Description",
+            "default": ""
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 30000,
+            "minLength": 1,
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "content"
+        ],
+        "title": "SkillCreate"
+      },
+      "SkillItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "runtime_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Key"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "description",
+          "content",
+          "enabled",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SkillItem"
+      },
+      "SkillList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SkillItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "SkillList"
+      },
+      "SkillUpdate": {
+        "properties": {
+          "runtime_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "image.outpainting"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Key"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Description"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 30000,
+            "minLength": 1,
+            "title": "Content"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version",
+          "name",
+          "description",
+          "content",
+          "enabled"
+        ],
+        "title": "SkillUpdate"
+      },
       "SubmitTextCompletionRequest": {
         "properties": {
           "prompt": {
@@ -5086,6 +6322,47 @@
           "prompt"
         ],
         "title": "SubmitTextCompletionRequest"
+      },
+      "SystemSettingsResponse": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "assets": {
+            "$ref": "#/components/schemas/AssetSettings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema_version",
+          "revision",
+          "assets"
+        ],
+        "title": "SystemSettingsResponse"
+      },
+      "SystemSettingsUpdate": {
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Revision"
+          },
+          "assets": {
+            "$ref": "#/components/schemas/AssetSettings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revision",
+          "assets"
+        ],
+        "title": "SystemSettingsUpdate"
       },
       "TextCompletionErrorBody": {
         "properties": {
@@ -5507,6 +6784,30 @@
           "clips"
         ],
         "title": "VideoTrack"
+      },
+      "WorkPublication": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "public": {
+            "type": "boolean",
+            "title": "Public"
+          },
+          "can_publish": {
+            "type": "boolean",
+            "title": "Can Publish"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "public",
+          "can_publish"
+        ],
+        "title": "WorkPublication"
       }
     }
   }

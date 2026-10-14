@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -19,7 +19,7 @@ class CreateModelConfigRequest(_StrictRequest):
 
 
 class DisableModelConfigRequest(_StrictRequest):
-    enabled: Literal[False]
+    enabled: bool
 
 
 class PublicModelConfig(BaseModel):
@@ -45,6 +45,26 @@ class AdminModelConfig(PublicModelConfig):
 
 class AdminModelConfigList(BaseModel):
     items: list[AdminModelConfig]
+
+
+class ProviderModelOption(BaseModel):
+    name: str
+    alias_zh: str
+    alias_en: str
+    capabilities: list[str]
+    inputs: list[str] = []
+    parameters: dict[str, Any]
+
+
+class ProviderCatalogItem(BaseModel):
+    id: str
+    alias_zh: str
+    alias_en: str
+    models: list[ProviderModelOption]
+
+
+class ProviderCatalogList(BaseModel):
+    items: list[ProviderCatalogItem]
 
 
 class ModelAssignmentItem(BaseModel):

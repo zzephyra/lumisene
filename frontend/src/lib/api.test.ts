@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { apiRequest, setUnauthorizedHandler } from "./api";
+import { ApiError, userFacingMessage, apiRequest, setUnauthorizedHandler } from "./api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -67,4 +67,10 @@ describe("apiRequest", () => {
     ).rejects.toMatchObject({ status: 401 });
     expect(handler).toHaveBeenCalledOnce();
   });
+});
+
+it("explains gateway failures without exposing server internals", () => {
+  for (const status of [500, 502, 503, 504]) {
+    expect(userFacingMessage(new ApiError({ status, code: "invalid_response", message: "proxy internals", details: {}, requestId: null }))).toBe("服务器暂时不可用，请稍后重试");
+  }
 });

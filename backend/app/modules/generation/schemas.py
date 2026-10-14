@@ -54,7 +54,14 @@ class GenerationInputResponse(BaseModel):
     height: int
 
 
+class ImageEditLimits(BaseModel):
+    max_width: int
+    max_height: int
+    max_pixels: int
+
+
 class ImageEditorOption(BaseModel):
+    limits: ImageEditLimits | None = None
     capability: str
     available: bool
     reason: str | None

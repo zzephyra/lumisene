@@ -1,14 +1,15 @@
+
 """Queue one explicit image generation and finish it outside the request transaction."""
 
 import asyncio
 import hashlib
 import json
 import re
-from datetime import UTC, datetime
+import traceback
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID, uuid4
 
-from PIL import Image
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -21,24 +22,58 @@ from app.core.errors import (
     NotFoundError,
     ValidationError,
 )
+from app.core.errors import TimeoutError as ProviderTimeout
 from app.core.logging import get_logger
 from app.infrastructure.ai.adapters.openai_images import OpenAICompatibleImages
-from app.infrastructure.ai.catalog import require_assigned, require_editor_model
+from app.infrastructure.ai.adapters.outpainting import NativeOutpainting, validate_parameters
+from app.infrastructure.ai.adapters.wan_image_edit import WanImageEditing, expansion_parameters
+from app.infrastructure.ai.catalog import (
+    require_assigned,
+    require_editor_model,
+    require_outpaint_model,
+)
 from app.infrastructure.ai.domain import PROMPT_MAX_LENGTH, json_object
+from app.infrastructure.ai.inpainting import composite_edits as _composite_edits
 from app.infrastructure.ai.models import ModelConfig
 from app.infrastructure.db.session import UnitOfWork
-from app.infrastructure.storage.s3 import S3Storage
-from app.modules.generation.inputs import decode_image, png, require_input
+from app.infrastructure.storage.objects import build_object_storage
+from app.modules.generation.inputs import require_input
 from app.modules.generation.models import Asset, GenerationOutput, GenerationTask
+from app.modules.generation.persistence import (
+    describe_outputs,
+    put_if_changed,
+    register_stored_assets,
+    remember_objects,
+    storage_identity,
+)
 
 logger = get_logger(__name__)
 _IDEMPOTENCY_KEY = re.compile(r"^[\x21-\x7e]{1,128}$")
-_EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
 
 
 class ImageClient(Protocol):
+    async def reference(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        prompt: str,
+        image: bytes,
+        size: str | None = None,
+        count: int = 1,
+    ) -> list[tuple[bytes, str]]: ...
+
     async def edit(
-        self, *, base_url: str, api_key: str, model: str, prompt: str, image: bytes, mask: bytes
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        prompt: str,
+        image: bytes,
+        mask: bytes,
+        full_context: bool = False,
     ) -> list[tuple[bytes, str]]: ...
 
     async def generate(
@@ -71,9 +106,11 @@ class ImageGenerationService:
         storage: ObjectStorage | None = None,
     ) -> None:
         self.settings = settings
+        self.outpaint_client = NativeOutpainting()
+        self.image_edit_client = WanImageEditing()
         self.session_factory = session_factory
         self.client = client or OpenAICompatibleImages()
-        self.storage = storage or S3Storage(settings)
+        self.storage = storage or build_object_storage(settings)
 
     async def submit(
         self,
@@ -88,17 +125,40 @@ class ImageGenerationService:
     ) -> GenerationTask:
         key = _clean_key(idempotency_key)
         cleaned = _clean_prompt(prompt)
-        safe_parameters = _parameters(parameters)
+        safe_parameters = (
+            {} if input_id and set(parameters) == {"outpaint"} else _parameters(parameters)
+        )
         if not self.settings.object_storage_configured:
             raise ValidationError("Object storage is not configured")
         source = None
         if input_id:
-            if parameters:
-                raise ValidationError("局部重绘不支持额外生成参数")
-            config = await require_editor_model(uow, self.settings, "image_inpaint")
-            source = await require_input(uow.session, project_id, input_id, inpaint=True)
+            source = await require_input(uow.session, project_id, input_id, inpaint=None)
+            if "outpaint" in parameters:
+                if source.mask_key:
+                    raise ValidationError("扩图已改用专用模型，请刷新页面，仅上传原图")
+                config = await require_outpaint_model(uow, self.settings)
+                safe_parameters = {
+                    "outpaint": validate_parameters(
+                        parameters["outpaint"], source.width, source.height
+                    )
+                }
+            else:
+                operation = "image_inpaint" if source.mask_key else "image_to_image"
+                config = await require_editor_model(uow, self.settings, operation)
+                if source.mask_key and parameters:
+                    raise ValidationError("局部重绘不支持额外生成参数")
+
         else:
             config = await require_assigned(uow.session, "text_to_image")
+        if source and config.model_name == "wanx2.1-imageedit":
+            if len(cleaned) > 800:
+                raise ValidationError("图像编辑描述不能超过 800 字符")
+            if not (512 <= source.width <= 4096 and 512 <= source.height <= 4096):
+                raise ValidationError("图像编辑原图宽高须为 512–4096 像素")
+            if "outpaint" in safe_parameters:
+                expansion_parameters(safe_parameters["outpaint"], source.width, source.height)
+            elif safe_parameters.get("n", 1) != 1:
+                raise ValidationError("图像编辑每次生成一张图片")
         if self.settings.model_endpoint(config.secret_ref) is None:
             raise ValidationError("Secret reference is not configured")
         hash_parameters = (
@@ -119,7 +179,18 @@ class ImageGenerationService:
             request_snapshot={
                 "prompt": cleaned,
                 "parameters": safe_parameters,
-                "operation": "image_inpaint" if source else "text_to_image",
+                **(
+                    {"outpaint_protocol": 3}
+                    if source and config.model_name == "wanx2.1-imageedit"
+                    else {"outpaint_protocol": 2}
+                    if "outpaint" in safe_parameters
+                    else {}
+                ),
+                "operation": "image_outpaint"
+                if "outpaint" in safe_parameters
+                else ("image_inpaint" if source.mask_key else "image_to_image")
+                if source
+                else "text_to_image",
             },
             input_id=input_id,
             kind="image",
@@ -160,6 +231,7 @@ class ImageGenerationService:
         *,
         project_id: UUID,
         limit: int = 20,
+        offset: int = 0,
         kind: str | None = None,
     ) -> list[GenerationTask]:
         stmt = select(GenerationTask).where(GenerationTask.project_id == project_id)
@@ -168,7 +240,7 @@ class ImageGenerationService:
         stmt = stmt.order_by(GenerationTask.created_at.desc(), GenerationTask.id.desc()).limit(
             min(max(limit, 1), 20)
         )
-        return list((await uow.session.execute(stmt)).scalars().all())
+        return list((await uow.session.execute(stmt.offset(offset))).scalars().all())
 
     async def output_ids(
         self,
@@ -246,6 +318,22 @@ class ImageGenerationService:
             raise NotFoundError("Asset was not found")
         return asset
 
+    async def asset_for_member(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: UUID,
+        asset_id: UUID,
+    ) -> Asset:
+        asset = (
+            await uow.session.execute(
+                select(Asset).where(Asset.id == asset_id, Asset.project_id == project_id)
+            )
+        ).scalar_one_or_none()
+        if asset is None:
+            raise NotFoundError("Asset was not found")
+        return asset
+
     async def editor_assets(self, uow: UnitOfWork, *, project_id: UUID) -> list[Asset]:
         rows = await uow.session.execute(
             select(Asset)
@@ -267,6 +355,7 @@ class ImageGenerationService:
         width: int,
         height: int,
     ) -> Asset:
+        provider, bucket = storage_identity(self.storage, self.settings)
         asset = Asset(
             id=asset_id,
             project_id=project_id,
@@ -279,6 +368,8 @@ class ImageGenerationService:
             sha256=hashlib.sha256(content).hexdigest(),
             width=width,
             height=height,
+            storage_provider=provider,
+            bucket=bucket,
         )
         uow.session.add(asset)
         await uow.session.flush()
@@ -301,6 +392,12 @@ class ImageGenerationService:
             return
         project_id, actor_id, prompt, model_config_id, parameters = claimed
         try:
+            async with self._factory()() as session:
+                current = await session.get(GenerationTask, task_id)
+                native_edit = current.request_snapshot.get("outpaint_protocol") == 3
+            if "outpaint" in parameters or native_edit:
+                await self._submit_outpaint(task_id)
+                return
             images = await self._call_provider(model_config_id, prompt, parameters, task_id=task_id)
             await self._store(task_id, project_id, actor_id, images)
         except ApplicationError as exc:
@@ -311,12 +408,19 @@ class ImageGenerationService:
             )
             await self._fail(task_id, exc.code, exc.message)
         except Exception as exc:
-            logger.info(
+            # Record locations only: exception messages/locals can contain credentials or images.
+            frames = traceback.extract_tb(exc.__traceback__)
+            logger.error(
                 "image_generation_failed",
                 task_id=str(task_id),
                 error_type=type(exc).__name__,
+                error_locations=[f"{frame.name}:{frame.lineno}" for frame in frames],
             )
-            await self._fail(task_id, "provider_error", "The model provider request failed")
+            await self._fail(
+                task_id,
+                "processing_error",
+                "图片处理发生异常，请稍后重试；管理员可通过任务记录定位原因",
+            )
 
     async def _claim(self, task_id: UUID) -> tuple[UUID, UUID, str, UUID, dict] | None:
         factory = self._factory()
@@ -376,13 +480,24 @@ class ImageGenerationService:
             source = None
             task = await session.get(GenerationTask, task_id) if task_id else None
             if task is not None and task.input_id is not None:
-                source = await require_input(session, task.project_id, task.input_id, inpaint=True)
+                source = await require_input(session, task.project_id, task.input_id, inpaint=None)
         endpoint = self.settings.model_endpoint(secret_ref)
         if endpoint is None:
             raise ValidationError("Secret reference is not configured")
         base_url, api_key = endpoint
         if source is not None:
             image = await self.storage.get_object(object_key=source.image_key)
+            if not source.mask_key:
+                size, count = _provider_options(parameters)
+                return await self.client.reference(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model_name,
+                    prompt=prompt,
+                    image=image,
+                    size=size,
+                    count=count,
+                )
             mask = await self.storage.get_object(object_key=source.mask_key)
             images = await self.client.edit(
                 base_url=base_url,
@@ -392,7 +507,6 @@ class ImageGenerationService:
                 image=image,
                 mask=mask,
             )
-            # Keep pixels outside the user's selection exactly unchanged.
             return await asyncio.to_thread(_composite_edits, image, mask, images)
         size, count = _provider_options(parameters)
         return await self.client.generate(
@@ -404,65 +518,311 @@ class ImageGenerationService:
             count=count,
         )
 
+    async def _submit_outpaint(self, task_id: UUID) -> None:
+        async with self._factory()() as session:
+            task = await session.get(GenerationTask, task_id)
+            if task.request_snapshot.get("outpaint_protocol") not in {2, 3}:
+                raise ValidationError("旧扩图任务已停止支持，请使用专用扩图重新提交")
+            config = await session.get(ModelConfig, task.model_config_id)
+            if (
+                not config
+                or not config.enabled
+                or config.model_name not in {"image-out-painting", "wanx2.1-imageedit"}
+            ):
+                raise ValidationError("专用扩图模型已停用或不存在")
+            endpoint = self.settings.model_endpoint(config.secret_ref)
+            if not endpoint:
+                raise ValidationError("扩图模型凭据未配置")
+            source = await require_input(session, task.project_id, task.input_id, inpaint=None)
+            parameters = task.request_snapshot["parameters"].get("outpaint", {})
+        image = await self.storage.get_object(object_key=source.image_key)
+        await self.save_outpaint_debug_assets(
+            task,
+            {
+                "original.png": image,
+                "request.json": json.dumps(
+                    {
+                        "model": config.model_name,
+                        "operation": task.request_snapshot.get("operation"),
+                        "prompt": task.request_snapshot.get("prompt"),
+                        "parameters": parameters,
+                    }
+                ).encode(),
+            },
+        )
+        # Persist intent before the irreversible submit. Unknown outcomes are never resubmitted.
+        async with self._factory()() as session:
+            await session.execute(
+                update(GenerationTask)
+                .where(GenerationTask.id == task_id)
+                .values(
+                    reconciliation_required=True,
+                    phase="provider_submit",
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            await session.commit()
+        try:
+            client = (
+                self.image_edit_client
+                if task.request_snapshot.get("outpaint_protocol") == 3
+                else self.outpaint_client
+            )
+            extra = {}
+            if task.request_snapshot.get("outpaint_protocol") == 3:
+                extra = {
+                    "operation": task.request_snapshot["operation"],
+                    "prompt": task.request_snapshot["prompt"],
+                    "mask": await self.storage.get_object(object_key=source.mask_key)
+                    if source.mask_key
+                    else None,
+                }
+            remote_id = await client.submit(
+                base_url=endpoint[0],
+                api_key=endpoint[1],
+                image=image,
+                parameters=parameters,
+                **extra,
+            )
+        except ProviderTimeout:
+            return
+        async with self._factory()() as session:
+            await session.execute(
+                update(GenerationTask)
+                .where(GenerationTask.id == task_id)
+                .values(
+                    provider_task_id=remote_id,
+                    reconciliation_required=False,
+                    phase="generating",
+                    next_poll_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            await session.commit()
+
+    async def poll_outpaints(self) -> None:
+        """Short, leased queries. A process restart resumes remote IDs, never submits again."""
+        now = datetime.now(UTC)
+        async with self._factory()() as session:
+            rows = list(
+                (
+                    await session.scalars(
+                        select(GenerationTask)
+                        .where(
+                            GenerationTask.kind == "image",
+                            GenerationTask.status == "running",
+                            GenerationTask.request_snapshot["outpaint_protocol"]
+                            .as_integer()
+                            .in_([2, 3]),
+                            GenerationTask.provider_task_id.is_not(None),
+                            GenerationTask.reconciliation_required.is_(False),
+                            (
+                                GenerationTask.next_poll_at.is_(None)
+                                | (GenerationTask.next_poll_at <= now)
+                            ),
+                            (
+                                GenerationTask.lease_expires_at.is_(None)
+                                | (GenerationTask.lease_expires_at <= now)
+                            ),
+                        )
+                        .with_for_update(skip_locked=True)
+                        .limit(1)
+                    )
+                ).all()
+            )
+            for row in rows:
+                row.lease_token += 1
+                row.lease_expires_at = now + timedelta(minutes=5)
+                row.next_poll_at = now + timedelta(seconds=5)
+            await session.commit()
+        for task in rows:
+            try:
+                async with self._factory()() as session:
+                    config = await session.get(ModelConfig, task.model_config_id)
+                endpoint = self.settings.model_endpoint(config.secret_ref) if config else None
+                if not endpoint:
+                    raise ValidationError("扩图模型凭据未配置")
+                client = (
+                    self.image_edit_client
+                    if task.request_snapshot.get("outpaint_protocol") == 3
+                    else self.outpaint_client
+                )
+                state, result = await client.poll(
+                    base_url=endpoint[0], api_key=endpoint[1], task_id=task.provider_task_id
+                )
+                if state == "succeeded":
+                    await self._store(
+                        task.id,
+                        task.project_id,
+                        task.actor_id,
+                        [result],
+                        lease_token=task.lease_token,
+                    )
+                elif state == "failed":
+                    await self._fail(
+                        task.id,
+                        "provider_failed",
+                        "扩图服务生成失败或已取消",
+                        lease_token=task.lease_token,
+                    )
+            except Exception as exc:
+                # Query/download failure is not evidence of generation failure.
+                logger.warning(
+                    "outpaint_poll_failed", task_id=str(task.id), error_type=type(exc).__name__
+                )
+            finally:
+                async with self._factory()() as session:
+                    await session.execute(
+                        update(GenerationTask)
+                        .where(
+                            GenerationTask.id == task.id,
+                            GenerationTask.lease_token == task.lease_token,
+                            GenerationTask.status == "running",
+                        )
+                        .values(
+                            lease_expires_at=None,
+                            next_poll_at=datetime.now(UTC) + timedelta(seconds=5),
+                            reconciliation_required=bool(
+                                task.started_at and now - task.started_at > timedelta(hours=24)
+                            ),
+                        )
+                    )
+                    await session.commit()
+
+    async def save_outpaint_debug_assets(self, task: GenerationTask, artifacts: dict) -> None:
+        """Private project asset; index in PG, bytes in object storage, including failures."""
+        import io
+        import zipfile
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, data in artifacts.items():
+                archive.writestr(name, data)
+        content = buffer.getvalue()
+        asset_id = uuid4()
+        key = f"projects/{task.project_id}/assets/{asset_id}/outpaint-debug.zip"
+        provider, bucket = storage_identity(self.storage, self.settings)
+        factory = self._factory()
+        async with factory() as session:
+            session.add(
+                Asset(
+                    id=asset_id,
+                    project_id=task.project_id,
+                    kind="FILE",
+                    object_key=key,
+                    sha256=hashlib.sha256(content).hexdigest(),
+                    mime="application/zip",
+                    size_bytes=len(content),
+                    status="uploading",
+                    created_by=task.actor_id,
+                    storage_provider=provider,
+                    bucket=bucket,
+                )
+            )
+            await session.commit()
+        try:
+            await self.storage.put_object(
+                object_key=key, content=content, content_type="application/zip"
+            )
+        except Exception:
+            async with factory() as session:
+                await session.execute(
+                    update(Asset).where(Asset.id == asset_id).values(status="failed")
+                )
+                await session.commit()
+            raise
+        async with factory() as session:
+            row = (
+                await session.execute(
+                    select(GenerationTask)
+                    .where(
+                        GenerationTask.id == task.id, GenerationTask.project_id == task.project_id
+                    )
+                    .with_for_update()
+                )
+            ).scalar_one()
+            row.request_snapshot = dict(row.request_snapshot, outpaint_debug_asset_id=str(asset_id))
+            await session.execute(update(Asset).where(Asset.id == asset_id).values(status="ready"))
+            await session.commit()
+
     async def _store(
         self,
         task_id: UUID,
         project_id: UUID,
         actor_id: UUID,
         images: list[tuple[bytes, str]],
+        lease_token: int | None = None,
     ) -> None:
-        stored: list[tuple[UUID, str, bytes, str]] = []
-        for content, mime in images:
-            extension = _EXTENSIONS.get(mime, "img")
-            asset_id = uuid4()
-            object_key = f"projects/{project_id}/assets/{asset_id}/image.{extension}"
-            await self.storage.put_object(object_key=object_key, content=content, content_type=mime)
-            stored.append((asset_id, object_key, content, mime))
+        del actor_id
+        if lease_token is not None:
+            factory = self._factory()
+            async with factory() as session:
+                task = await session.get(GenerationTask, task_id)
+                if task is None or task.status != "running" or task.lease_token != lease_token:
+                    return
+        items = describe_outputs(project_id, task_id, images)
+        for (content, _mime), item in zip(images, items, strict=True):
+            await put_if_changed(
+                self.storage,
+                object_key=item["object_key"],
+                content=content,
+                content_type=item["mime"],
+            )
+        provider, bucket = storage_identity(self.storage, self.settings)
         factory = self._factory()
         async with factory() as session:
-            for ordinal, (asset_id, object_key, content, mime) in enumerate(stored, start=1):
-                session.add(
-                    Asset(
-                        id=asset_id,
-                        project_id=project_id,
-                        kind="IMAGE",
-                        object_key=object_key,
-                        sha256=hashlib.sha256(content).hexdigest(),
-                        mime=mime,
-                        size_bytes=len(content),
-                        width=None,
-                        height=None,
-                        status="ready",
-                        created_by=actor_id,
-                    )
-                )
-                session.add(
-                    GenerationOutput(
-                        project_id=project_id,
-                        task_id=task_id,
-                        asset_id=asset_id,
-                        ordinal=ordinal,
-                    )
-                )
-            await session.execute(
-                update(GenerationTask)
-                .where(GenerationTask.id == task_id, GenerationTask.status == "running")
-                .values(
-                    status="succeeded",
-                    phase=None,
-                    finished_at=datetime.now(UTC),
-                    updated_at=datetime.now(UTC),
-                )
+            await remember_objects(session, task_id, items)
+        async with factory() as session:
+            await register_stored_assets(
+                session,
+                task_id,
+                storage_provider=provider,
+                bucket=bucket,
             )
-            await session.commit()
         logger.info("image_generation_succeeded", task_id=str(task_id))
 
-    async def _fail(self, task_id: UUID, code: str, message: str) -> None:
+    async def recover_persisted(self) -> None:
+        factory = self._factory()
+        async with factory() as session:
+            task_ids = list(
+                (
+                    await session.execute(
+                        select(GenerationTask.id)
+                        .where(
+                            GenerationTask.status == "running",
+                            GenerationTask.phase == "persisting",
+                            GenerationTask.kind == "image",
+                        )
+                        .limit(5)
+                    )
+                ).scalars()
+            )
+        provider, bucket = storage_identity(self.storage, self.settings)
+        for task_id in task_ids:
+            async with factory() as session:
+                await register_stored_assets(
+                    session,
+                    task_id,
+                    storage_provider=provider,
+                    bucket=bucket,
+                )
+
+    async def _fail(
+        self, task_id: UUID, code: str, message: str, lease_token: int | None = None
+    ) -> None:
         factory = self._factory()
         async with factory() as session:
             await session.execute(
                 update(GenerationTask)
-                .where(GenerationTask.id == task_id, GenerationTask.status == "running")
+                .where(
+                    GenerationTask.id == task_id,
+                    GenerationTask.status == "running",
+                    *(
+                        [GenerationTask.lease_token == lease_token]
+                        if lease_token is not None
+                        else []
+                    ),
+                )
                 .values(
                     status="failed",
                     phase=None,
@@ -582,13 +942,3 @@ async def _get(session: AsyncSession, project_id: UUID, task_id: UUID) -> Genera
         GenerationTask.project_id == project_id,
     )
     return (await session.execute(stmt)).scalar_one_or_none()
-
-
-def _composite_edits(original: bytes, mask: bytes, images: list[tuple[bytes, str]]):
-    source = decode_image(original)
-    selection = decode_image(mask).convert("L")
-    results = []
-    for content, _mime in images:
-        edited = decode_image(content).resize(source.size, Image.Resampling.LANCZOS)
-        results.append((png(Image.composite(edited, source, selection)), "image/png"))
-    return results

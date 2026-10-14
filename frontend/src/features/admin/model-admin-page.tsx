@@ -1,7 +1,8 @@
+import { ModelOperationTags, modelDetailsUrl } from "./model-presentation";
 import { brand } from "../../brand";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Library, LoaderCircle, Menu, Monitor, MoreHorizontal, Plus, Power, RefreshCw, Search } from "lucide-react";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, Outlet, useLocation, useOutletContext } from "react-router";
 
 import {
@@ -13,7 +14,7 @@ import {
   AlertDialogTitle,
 } from "../../components/ui/alert-dialog";
 import { Button } from "../../components/ui/button";
-import { Field, fieldErrorId } from "../../components/ui/field";
+import { Field } from "../../components/ui/field";
 import { LumiMark } from "../../components/brand/LumiLogo";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "../../components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu";
@@ -21,18 +22,19 @@ import "./admin.css";
 import { Input } from "../../components/ui/input";
 import { Select } from "../../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
-import { Textarea } from "../../components/ui/textarea";
 import { isApiError, userFacingMessage } from "../../lib/api";
 import { cn } from "../../lib/cn";
-import { isRecord } from "../../lib/record";
 import { AccountMenu } from "../auth";
 import {
   assignModel,
   clearModelAssignment,
   createModelConfig,
   disableModelConfig,
+  enableModelConfig,
   listModelAssignments,
+  listModelCatalog,
   listModelConfigs,
+  type ProviderModelOption,
   modelAdminQueryKey,
   modelAssignmentQueryKey,
   type CreateModelConfigInput,
@@ -43,11 +45,13 @@ import {
 const CAPABILITIES = [
   ["text_generation", "文本生成"],
   ["text_to_image", "图片生成"],
-  ["text_to_video", "视频生成"],
+  ["text_to_video", "视频"],
   ["embedding", "向量"],
   ["speech_synthesis", "语音合成"],
   ["speech_recognition", "语音识别"],
 ] as const;
+
+export const ASSIGNMENT_TOAST_MS = 2800;
 
 import { ADMIN_GROUPS, ADMIN_MODULES } from "./admin-navigation";
 
@@ -114,7 +118,7 @@ export function AssignmentScreen() {
 function AdminFrame({ children }: { children: ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
   const { pathname } = useLocation();
-  const title = ADMIN_MODULES.find((item) => item.path === pathname.replace(/\/$/, ""))?.title ?? "控制台总览";
+  const title = pathname.startsWith("/admin/models/details") ? "模型详情" : ADMIN_MODULES.find((item) => item.path === pathname.replace(/\/$/, ""))?.title ?? "控制台总览";
   const [theme, setTheme] = useState<"light" | "dark">("light");
 
   function sidebarContent() { return <>
@@ -132,8 +136,8 @@ function AdminFrame({ children }: { children: ReactNode }) {
           {ADMIN_GROUPS.map(group => <div key={group}>
             <p className="admin-nav-label">{group}</p>
             {ADMIN_MODULES.filter(item => item.group === group).map(({ path, title, icon: Icon, planned }) => (
-              <Link key={path} to={path} aria-current={pathname.replace(/\/$/, "") === path ? "page" : undefined} onClick={() => setNavOpen(false)}
-                className={cn("admin-navigation-link", pathname.replace(/\/$/, "") === path && "is-active")}>
+              <Link key={path} to={path} aria-current={(pathname.replace(/\/$/, "") === path || (path === "/admin/models" && pathname.startsWith("/admin/models/"))) ? "page" : undefined} onClick={() => setNavOpen(false)}
+                className={cn("admin-navigation-link", (pathname.replace(/\/$/, "") === path || (path === "/admin/models" && pathname.startsWith("/admin/models/"))) && "is-active")}>
                 <Icon aria-hidden size={17} /><span>{title}</span>
                 {planned && <span className="admin-nav-planned">待接入</span>}
               </Link>
@@ -175,18 +179,38 @@ function AdminFrame({ children }: { children: ReactNode }) {
   );
 }
 
+const PARAMETER_LABELS: Record<string, string> = {
+  resolutions: "清晰度",
+  sizes: "尺寸",
+  ratios: "画幅",
+  duration: "时长",
+  durations: "时长",
+};
+
+const INPUT_LABELS: Record<string, string> = {
+  text: "文本",
+  image: "图片",
+  video: "视频",
+  audio: "音频",
+};
+
+function catalogLabel(aliasZh: string, aliasEn: string, name: string) {
+  const alias = aliasZh || aliasEn;
+  return alias && alias !== name ? `${alias} · ${name}` : name;
+}
+
 function CreateModelForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: () => void }) {
   const queryClient = useQueryClient();
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [provider, setProvider] = useState("");
+  const catalog = useQuery({
+    queryKey: ["admin", "model-catalog"],
+    queryFn: ({ signal }) => listModelCatalog(signal),
+  });
+  const providers = catalog.data ?? [];
+  const [providerId, setProviderId] = useState("");
   const [modelName, setModelName] = useState("");
-  const [capability, setCapability] = useState<(typeof CAPABILITIES)[number][0]>("text_generation");
-  const [secretRef, setSecretRef] = useState("");
-  const [parametersText, setParametersText] = useState("{}");
-  const [limitsText, setLimitsText] = useState("{}");
-  const [parametersError, setParametersError] = useState<string | null>(null);
-  const [limitsError, setLimitsError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const provider = providers.find((item) => item.id === providerId) ?? providers[0];
+  const model = provider?.models.find((item) => item.name === modelName) ?? provider?.models[0];
   const create = useMutation({
     mutationFn: createModelConfig,
     onSuccess: async () => {
@@ -197,30 +221,24 @@ function CreateModelForm({ onCreated, onCancel }: { onCreated: () => void; onCan
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const parameters = parseJsonObject(parametersText);
-    const limits = parseJsonObject(limitsText);
-    setParametersError(parameters.ok ? null : "参数说明必须是 JSON 对象");
-    setLimitsError(limits.ok ? null : "调用限制必须是 JSON 对象");
-    if (!parameters.ok || !limits.ok) {
-      setAdvancedOpen(true);
+    if (!provider || !model || model.capabilities.length === 0) {
       return;
     }
-    const input: CreateModelConfigInput = {
-      provider: provider.trim(),
-      model_name: modelName.trim(),
-      capability,
-      parameters_schema: parameters.value,
-      limits: limits.value,
-      secret_ref: secretRef.trim(),
-    };
     setFormError(null);
     try {
-      await create.mutateAsync(input);
-      setProvider("");
+      for (const capability of model.capabilities) {
+        const input: CreateModelConfigInput = {
+          provider: provider.id,
+          model_name: model.name,
+          capability,
+          parameters_schema: model.parameters,
+          limits: {},
+          secret_ref: provider.id,
+        };
+        await create.mutateAsync(input);
+      }
+      setProviderId("");
       setModelName("");
-      setSecretRef("");
-      setParametersText("{}");
-      setLimitsText("{}");
       onCreated();
     } catch (error) {
       setFormError(userFacingMessage(error));
@@ -235,73 +253,82 @@ function CreateModelForm({ onCreated, onCancel }: { onCreated: () => void; onCan
       onSubmit={(event) => void onSubmit(event)}
     >
       <h3 className="admin-form-section-title">基本信息</h3>
+      {catalog.isPending ? <p role="status">正在读取供应商</p> : null}
+      {catalog.isError ? <p role="alert">供应商目录没有载入</p> : null}
+      {!catalog.isPending && !catalog.isError && providers.length === 0 ? (
+        <p role="status">还没有可登记的供应商。请先在 model-endpoints.yaml 写上别名、模型和参数。</p>
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id="model-provider" label="供应商">
-          <Input
-            id="model-provider"
-            onChange={(event) => setProvider(event.target.value)}
-            required
-            value={provider}
-          />
-        </Field>
-        <Field id="model-name" label="模型名称">
-          <Input
-            id="model-name"
-            onChange={(event) => setModelName(event.target.value)}
-            required
-            value={modelName}
-          />
-        </Field>
-        <Field id="model-capability" label="能力">
           <Select
-            id="model-capability"
-            onChange={(next) => setCapability(next as (typeof CAPABILITIES)[number][0])}
-            options={CAPABILITIES.map(([value, label]) => ({ value, label }))}
-            value={capability}
+            id="model-provider"
+            onChange={(next) => {
+              setProviderId(next);
+              setModelName("");
+            }}
+            options={providers.map((item) => ({ value: item.id, label: catalogLabel(item.alias_zh, item.alias_en, item.id) }))}
+            value={provider?.id ?? ""}
           />
         </Field>
-        <Field id="model-secret-ref" label="密钥名称">
-          <Input
-            autoComplete="off"
-            id="model-secret-ref"
-            onChange={(event) => setSecretRef(event.target.value)}
-            required
-            spellCheck={false}
-            value={secretRef}
+        <Field id="model-name" label="模型">
+          <Select
+            id="model-name"
+            onChange={setModelName}
+            options={(provider?.models ?? []).map((item) => ({
+              value: item.name,
+              label: catalogLabel(item.alias_zh, item.alias_en, item.name),
+            }))}
+            value={model?.name ?? ""}
           />
         </Field>
       </div>
-      <p className="admin-helper">密钥名称引用服务端配置，请勿填写 API Key 明文。</p>
-      <details className="admin-advanced" open={advancedOpen} onToggle={event => setAdvancedOpen(event.currentTarget.open)}><summary>高级配置 <ChevronDown size={16} /></summary><p className="admin-helper">以 JSON 对象填写参数说明与调用限制。</p><div className="grid gap-4">
-      <Field error={parametersError} id="model-parameters" label="参数说明">
-        <Textarea
-          aria-describedby={parametersError ? fieldErrorId("model-parameters") : undefined}
-          aria-invalid={parametersError ? true : undefined}
-          id="model-parameters"
-          onChange={(event) => setParametersText(event.target.value)}
-          spellCheck={false}
-          value={parametersText}
-        />
-      </Field>
-      <Field error={limitsError} id="model-limits" label="调用限制">
-        <Textarea
-          aria-describedby={limitsError ? fieldErrorId("model-limits") : undefined}
-          aria-invalid={limitsError ? true : undefined}
-          id="model-limits"
-          onChange={(event) => setLimitsText(event.target.value)}
-          spellCheck={false}
-          value={limitsText}
-        />
-      </Field>
-      </div>
-      </details>
+      {model ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap gap-2">
+            <ModelOperationTags model={model} />
+            {model.capabilities.map((value) => (
+              <CapabilityTag key={value} value={value} />
+            ))}
+          </div>
+          {model.inputs.length > 0 ? (
+            <p className="admin-helper">
+              输入：{model.inputs.map((value) => INPUT_LABELS[value] ?? value).join("、")}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {model && provider && <Link className="admin-detail-back" to={modelDetailsUrl(provider.id, model.name)}>模型详情 →</Link>}
+      <ParameterChoices model={model} />
       {formError ? (
         <p className="text-sm text-danger" role="alert">
           {formError}
         </p>
       ) : null}
-      <div className="admin-form-footer"><Button variant="outline" disabled={create.isPending} onClick={onCancel}>取消</Button><Button className="min-w-28" disabled={create.isPending} type="submit">{create.isPending && <LoaderCircle className="animate-spin" size={14} />}{create.isPending ? "正在登记" : "确认登记"}</Button></div>
+      <div className="admin-form-footer"><Button variant="outline" disabled={create.isPending} onClick={onCancel}>取消</Button><Button className="min-w-28" disabled={create.isPending || !model} type="submit">{create.isPending && <LoaderCircle className="animate-spin" size={14} />}{create.isPending ? "正在登记" : "确认登记"}</Button></div>
     </form>
+  );
+}
+
+function ParameterChoices({ model }: { model: ProviderModelOption | undefined }) {
+  const entries = Object.entries(model?.parameters ?? {});
+  if (!model) {
+    return null;
+  }
+  if (entries.length === 0) {
+    return <p className="admin-helper">这个模型没有额外参数。</p>;
+  }
+  return (
+    <div>
+      <h3 className="admin-form-section-title">支持参数</h3>
+      <ul className="admin-helper">
+        {entries.map(([key, values]) => (
+          <li key={key}>
+            {PARAMETER_LABELS[key] ?? key}：
+            {values.map((value) => (key === "durations" && value === -1 ? "智能时长" : String(value))).join("、")}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -344,8 +371,8 @@ function CatalogTable({ items, assignedIds }: { items: ModelConfig[]; assignedId
     </div></div>
     {refreshError && <p className="text-sm text-danger" role="alert">{refreshError}</p>}
     {visible.length === 0 ? <div className="admin-empty"><Library size={28} /><h3>{items.length === 0 ? "还没有登记模型" : "没有匹配的模型"}</h3><p>{items.length === 0 ? "登记后的模型配置将在这里展示。" : "尝试其他名称，或清除筛选条件。"}</p><Button variant="outline" onClick={items.length === 0 ? () => setCreateOpen(true) : resetFilters}>{items.length === 0 ? "添加第一个模型" : "清除筛选条件"}</Button></div> : <><Table aria-label="模型配置目录"><TableHeader><TableRow className="border-t-0"><TableHead>模型 / 供应商</TableHead><TableHead>能力</TableHead><TableHead>版本</TableHead><TableHead>密钥名称</TableHead><TableHead>状态</TableHead><TableHead className="text-right"><span className="sr-only">操作</span></TableHead></TableRow></TableHeader><TableBody>{rows.map(item => <ModelConfigRow key={item.id} assigned={assignedIds.has(item.id)} item={item} />)}</TableBody></Table><div className="admin-pagination"><span>共 {visible.length} 条配置 · 第 {(currentPage - 1) * 10 + 1}–{Math.min(currentPage * 10, visible.length)} 条</span><div><Button variant="outline" aria-label="上一页" title="上一页" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={16} /></Button><span>{currentPage} / {pages}</span><Button variant="outline" aria-label="下一页" title="下一页" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}><ChevronRight size={16} /></Button></div></div></>}
-    <p className="admin-footnote">已发布的配置不可编辑；停用后不可恢复。登记操作不会调用供应商。</p>
-    <Dialog onOpenChange={setCreateOpen} open={createOpen}><DialogContent className="admin-surface admin-model-dialog"><DialogTitle className="admin-dialog-title">登记模型</DialogTitle><DialogDescription className="admin-dialog-description">添加一个模型配置版本。只保存密钥名称，不保存密钥本身。</DialogDescription><CreateModelForm onCreated={() => setCreateOpen(false)} onCancel={() => setCreateOpen(false)} /></DialogContent></Dialog>
+    <p className="admin-footnote">已发布的配置不可编辑。停用后可以恢复，但不会自动恢复业务指定。登记操作不会调用供应商。</p>
+    <Dialog onOpenChange={setCreateOpen} open={createOpen}><DialogContent className="admin-surface admin-model-dialog"><DialogTitle className="admin-dialog-title">登记模型</DialogTitle><DialogDescription className="admin-dialog-description">从已配置的供应商中选择模型和参数。只保存密钥名称，不保存密钥本身。</DialogDescription><CreateModelForm onCreated={() => setCreateOpen(false)} onCancel={() => setCreateOpen(false)} /></DialogContent></Dialog>
   </section>;
 }
 
@@ -357,25 +384,27 @@ function CatalogFilter({ label, value, options, onChange }: { label: string; val
 function ModelConfigRow({ item, assigned }: { item: ModelConfig; assigned: boolean }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [enabling, setEnabling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const disable = useMutation({
-    mutationFn: disableModelConfig,
+  const setEnabled = useMutation({
+    mutationFn: (enabled: boolean) =>
+      enabled ? enableModelConfig(item.id) : disableModelConfig(item.id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: modelAdminQueryKey });
       await queryClient.invalidateQueries({ queryKey: modelAssignmentQueryKey });
     },
   });
 
-  const label = capabilityLabel(item.capability);
+  const catalog = useQuery({ queryKey: ["admin", "model-catalog"], queryFn: ({ signal }) => listModelCatalog(signal) });
+  const metadata = catalog.data?.find((entry) => entry.id === item.secret_ref || entry.id === item.provider)?.models.find((model) => model.name === item.model_name);
+  const versionLabel = `${item.model_name} 版本 ${item.config_version}`;
   return (
     <TableRow>
       <TableCell className="text-ink">
         <div className="admin-model-name"><span className="admin-provider-icon" aria-hidden>{item.provider.slice(0, 1).toUpperCase()}</span><span><strong>{item.model_name}</strong><small>{item.provider}</small></span></div>
       </TableCell>
       <TableCell>
-        <span className="inline-flex h-6 items-center rounded-full border border-line px-2 text-xs text-muted">
-          {label}
-        </span>
+        <div className="admin-detail-tags"><CapabilityTag value={item.capability} />{metadata && <ModelOperationTags model={metadata} />}</div>
       </TableCell>
       <TableCell className="text-muted">{item.config_version}</TableCell>
       <TableCell className="text-muted">{item.secret_ref}</TableCell>
@@ -383,7 +412,8 @@ function ModelConfigRow({ item, assigned }: { item: ModelConfig; assigned: boole
         <span className={`admin-status ${item.enabled ? "is-active" : "is-inactive"}`}><span />{item.enabled ? "已启用" : "已停用"}</span>{assigned && <span className="admin-assigned">当前业务模型</span>}
       </TableCell>
       <TableCell className="text-right">
-        <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="admin-icon-button" aria-label={`${item.model_name} 版本 ${item.config_version} 操作`} title="模型操作"><MoreHorizontal size={18} /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="admin-surface admin-dropdown"><DropdownMenuItem disabled={!item.enabled || disable.isPending} className="text-danger" onSelect={() => { setError(null); setOpen(true); }}><Power size={14} />{item.enabled ? `停用 ${item.model_name} 版本 ${item.config_version}` : "已停用 · 不可恢复"}</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+        <Link className="admin-model-details-link" to={modelDetailsUrl(item.secret_ref, item.model_name, item.id)}>模型详情</Link>
+        <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="admin-icon-button" aria-label={`${versionLabel} 操作`} title="模型操作"><MoreHorizontal size={18} /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="admin-surface admin-dropdown"><DropdownMenuItem disabled={setEnabled.isPending} className={item.enabled ? "text-danger" : undefined} onSelect={() => { setError(null); setEnabling(!item.enabled); setOpen(true); }}><Power size={14} />{item.enabled ? `停用 ${versionLabel}` : `恢复 ${versionLabel}`}</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
         {error ? (
           <p className="mt-2 text-sm text-danger" role="alert">
             {error}
@@ -391,22 +421,37 @@ function ModelConfigRow({ item, assigned }: { item: ModelConfig; assigned: boole
         ) : null}
         <AlertDialog onOpenChange={setOpen} open={open}>
           <AlertDialogContent className="admin-surface admin-confirm-dialog">
-            <AlertDialogTitle className="admin-dialog-title">停用这个模型？</AlertDialogTitle>
+            <AlertDialogTitle className="admin-dialog-title">{enabling ? "恢复这个模型？" : "停用这个模型？"}</AlertDialogTitle>
             <AlertDialogDescription className="admin-dialog-description">
-              停用后，项目不再使用这个版本。如果它是当前业务模型，指定会同时取消。已发布的配置不能重新启用。
+              {enabling
+                ? "恢复后可以再次指定给业务。停用时取消的业务指定不会自动恢复。已发布的名称、版本和参数保持不变。"
+                : "停用后，项目不再使用这个版本。如果它是当前业务模型，指定会同时取消。已发布的名称、版本和参数不会改变，之后可以再恢复。"}
             </AlertDialogDescription>
             <div className="mt-6 flex justify-end gap-3">
               <AlertDialogCancel>取消</AlertDialogCancel>
-              <AlertDialogAction
-                disabled={disable.isPending}
-                onClick={() => {
-                  void disable.mutateAsync(item.id).catch((disableError: unknown) => {
-                    setError(userFacingMessage(disableError));
-                  });
-                }}
-              >
-                确认停用
-              </AlertDialogAction>
+              {enabling ? (
+                <Button
+                  disabled={setEnabled.isPending}
+                  onClick={() => {
+                    void setEnabled.mutateAsync(true).then(() => setOpen(false)).catch((enableError: unknown) => {
+                      setError(userFacingMessage(enableError));
+                    });
+                  }}
+                >
+                  确认恢复
+                </Button>
+              ) : (
+                <AlertDialogAction
+                  disabled={setEnabled.isPending}
+                  onClick={() => {
+                    void setEnabled.mutateAsync(false).catch((disableError: unknown) => {
+                      setError(userFacingMessage(disableError));
+                    });
+                  }}
+                >
+                  确认停用
+                </AlertDialogAction>
+              )}
             </div>
           </AlertDialogContent>
         </AlertDialog>
@@ -415,7 +460,16 @@ function ModelConfigRow({ item, assigned }: { item: ModelConfig; assigned: boole
   );
 }
 
+function CapabilityTag({ value }: { value: string }) {
+  return (
+    <span className="inline-flex h-6 items-center rounded-full border border-line px-2 text-xs text-muted">
+      {capabilityLabel(value)}
+    </span>
+  );
+}
+
 function capabilityLabel(value: string) {
+  if (value === "image_inpaint") return "图像编辑";
   return CAPABILITIES.find(([item]) => item === value)?.[1] ?? value;
 }
 
@@ -430,6 +484,23 @@ function BusinessAssignments({
   pending: boolean;
   error: unknown;
 }) {
+  const [toast, setToast] = useState<{ ok: boolean; message: string } | null>(null);
+  const toastTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (toastTimer.current !== null) {
+      window.clearTimeout(toastTimer.current);
+    }
+  }, []);
+
+  function showToast(next: { ok: boolean; message: string }) {
+    setToast(next);
+    if (toastTimer.current !== null) {
+      window.clearTimeout(toastTimer.current);
+    }
+    toastTimer.current = window.setTimeout(() => setToast(null), ASSIGNMENT_TOAST_MS);
+  }
+
   return (
     <section id="admin-assignments"><div className="admin-page-heading"><div><h1>业务指定</h1><p>为每项业务指定可用的模型配置。</p></div></div><div className="admin-assignment-list">
       <div className="border-b border-line px-5 py-4">
@@ -451,10 +522,18 @@ function BusinessAssignments({
               items={items}
               key={capability}
               label={label}
+              onResult={showToast}
             />
           ))
         : null}
-    </div></section>
+    </div>
+    {toast ? (
+      <p className={`admin-toast ${toast.ok ? "is-ok" : "is-danger"}`} role={toast.ok ? "status" : "alert"}>
+        {toast.ok ? <Check aria-hidden size={16} /> : <CircleAlert aria-hidden size={16} />}
+        {toast.message}
+      </p>
+    ) : null}
+    </section>
   );
 }
 
@@ -463,18 +542,19 @@ function AssignmentRow({
   label,
   items,
   assignment,
+  onResult,
 }: {
   capability: string;
   label: string;
   items: ModelConfig[];
   assignment: ModelAssignment | undefined;
+  onResult: (result: { ok: boolean; message: string }) => void;
 }) {
   const queryClient = useQueryClient();
   const choices = items.filter((item) => item.enabled && item.capability === capability);
   const assignedId = assignment?.model_config_id ?? "";
   const fallbackId = choices[0]?.id ?? "";
   const [selected, setSelected] = useState(assignedId || fallbackId);
-  const [error, setError] = useState<string | null>(null);
   const current = assignment?.model_name
     ? `${assignment.provider} · ${assignment.model_name}`
     : "当前未指定";
@@ -485,13 +565,21 @@ function AssignmentRow({
 
   const assign = useMutation({
     mutationFn: (modelConfigId: string) => assignModel(capability, modelConfigId),
-    onSuccess: async () => {
+    onSuccess: async (_assignment, modelConfigId) => {
+      const chosen = choices.find((item) => item.id === modelConfigId);
+      onResult({
+        ok: true,
+        message: chosen
+          ? `已将${label}指定为 ${chosen.provider} · ${chosen.model_name}`
+          : `已更新${label}的指定`,
+      });
       await queryClient.invalidateQueries({ queryKey: modelAssignmentQueryKey });
     },
   });
   const clear = useMutation({
     mutationFn: () => clearModelAssignment(capability),
     onSuccess: async () => {
+      onResult({ ok: true, message: `已取消${label}的指定` });
       await queryClient.invalidateQueries({ queryKey: modelAssignmentQueryKey });
     },
   });
@@ -520,9 +608,8 @@ function AssignmentRow({
           <Button
             disabled={!selected || assign.isPending}
             onClick={() => {
-              setError(null);
               void assign.mutateAsync(selected).catch((assignError: unknown) => {
-                setError(userFacingMessage(assignError));
+                onResult({ ok: false, message: `指定失败：${userFacingMessage(assignError)}` });
               });
             }}
             type="button"
@@ -533,9 +620,8 @@ function AssignmentRow({
             <Button
               disabled={clear.isPending}
               onClick={() => {
-                setError(null);
                 void clear.mutateAsync().catch((clearError: unknown) => {
-                  setError(userFacingMessage(clearError));
+                  onResult({ ok: false, message: `取消指定失败：${userFacingMessage(clearError)}` });
                 });
               }}
               type="button"
@@ -546,25 +632,6 @@ function AssignmentRow({
           ) : null}
         </div>
       </div>
-      {error ? (
-        <p className="text-sm text-danger md:col-span-3" role="alert">
-          {error}
-        </p>
-      ) : null}
     </div>
   );
-}
-
-function parseJsonObject(
-  value: string,
-): { ok: true; value: Record<string, unknown> } | { ok: false } {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (!isRecord(parsed)) {
-      return { ok: false };
-    }
-    return { ok: true, value: parsed };
-  } catch {
-    return { ok: false };
-  }
 }

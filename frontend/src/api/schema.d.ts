@@ -259,6 +259,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Skills */
+        get: operations["list_skills_api_v1_admin_skills_get"];
+        put?: never;
+        /** Create Skill */
+        post: operations["create_skill_api_v1_admin_skills_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/skills/{skill_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Skill */
+        get: operations["get_skill_api_v1_admin_skills__skill_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Skill */
+        delete: operations["delete_skill_api_v1_admin_skills__skill_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Skill */
+        patch: operations["update_skill_api_v1_admin_skills__skill_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/admin/system-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read System Settings */
+        get: operations["read_system_settings_api_v1_admin_system_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update System Settings */
+        patch: operations["update_system_settings_api_v1_admin_system_settings_patch"];
+        trace?: never;
+    };
     "/api/v1/auth/csrf": {
         parameters: {
             query?: never;
@@ -485,6 +540,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/model-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Model Catalog */
+        get: operations["list_model_catalog_api_v1_admin_model_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/model-configs": {
         parameters: {
             query?: never;
@@ -623,6 +695,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/assets/{asset_id}/deletion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Asset Deletion */
+        get: operations["read_asset_deletion_api_v1_projects__project_id__assets__asset_id__deletion_get"];
+        put?: never;
+        /** Delete Project Asset */
+        post: operations["delete_project_asset_api_v1_projects__project_id__assets__asset_id__deletion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/generation-inputs": {
         parameters: {
             query?: never;
@@ -649,6 +739,91 @@ export interface paths {
         };
         /** Image Editor Options */
         get: operations["image_editor_options_api_v1_projects__project_id__image_editor_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/generation-tasks/{task_id}/outpaint-debug": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Outpaint Debug Manifest */
+        get: operations["outpaint_debug_manifest_api_v1_projects__project_id__generation_tasks__task_id__outpaint_debug_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/assets/publication": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Publications */
+        get: operations["publications_api_v1_projects__project_id__assets_publication_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/assets/{asset_id}/publication": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Publish */
+        patch: operations["publish_api_v1_projects__project_id__assets__asset_id__publication_patch"];
+        trace?: never;
+    };
+    "/api/v1/public/users/{user_id}/works": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Public Works */
+        get: operations["public_works_api_v1_public_users__user_id__works_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/users/{user_id}/works/{asset_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Public Content */
+        get: operations["public_content_api_v1_public_users__user_id__works__asset_id__content_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1151,6 +1326,31 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** AssetDeletionResponse */
+        AssetDeletionResponse: {
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Deleted At */
+            deleted_at: string | null;
+            /**
+             * Policy
+             * @enum {string}
+             */
+            policy: "retain_cloud_file" | "delete_cloud_file";
+            /** Purge Status */
+            purge_status: ("pending" | "failed" | "purged") | null;
+        };
+        /** AssetSettings */
+        AssetSettings: {
+            /**
+             * Deletion Policy
+             * @enum {string}
+             */
+            deletion_policy: "retain_cloud_file" | "delete_cloud_file";
+        };
         /** AssignModelRequest */
         AssignModelRequest: {
             /**
@@ -1279,11 +1479,8 @@ export interface components {
         };
         /** DisableModelConfigRequest */
         DisableModelConfigRequest: {
-            /**
-             * Enabled
-             * @constant
-             */
-            enabled: false;
+            /** Enabled */
+            enabled: boolean;
         };
         /** DocumentList */
         DocumentList: {
@@ -1389,8 +1586,18 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ImageEditLimits */
+        ImageEditLimits: {
+            /** Max Width */
+            max_width: number;
+            /** Max Height */
+            max_height: number;
+            /** Max Pixels */
+            max_pixels: number;
+        };
         /** ImageEditorOption */
         ImageEditorOption: {
+            limits?: components["schemas"]["ImageEditLimits"] | null;
             /** Capability */
             capability: string;
             /** Available */
@@ -1512,6 +1719,42 @@ export interface components {
          * @enum {string}
          */
         ProjectRole: "OWNER" | "MEMBER";
+        /** ProviderCatalogItem */
+        ProviderCatalogItem: {
+            /** Id */
+            id: string;
+            /** Alias Zh */
+            alias_zh: string;
+            /** Alias En */
+            alias_en: string;
+            /** Models */
+            models: components["schemas"]["ProviderModelOption"][];
+        };
+        /** ProviderCatalogList */
+        ProviderCatalogList: {
+            /** Items */
+            items: components["schemas"]["ProviderCatalogItem"][];
+        };
+        /** ProviderModelOption */
+        ProviderModelOption: {
+            /** Name */
+            name: string;
+            /** Alias Zh */
+            alias_zh: string;
+            /** Alias En */
+            alias_en: string;
+            /** Capabilities */
+            capabilities: string[];
+            /**
+             * Inputs
+             * @default []
+             */
+            inputs: string[];
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            };
+        };
         /** PublicModelConfig */
         PublicModelConfig: {
             /**
@@ -1540,6 +1783,33 @@ export interface components {
         PublicModelConfigList: {
             /** Items */
             items: components["schemas"]["PublicModelConfig"][];
+        };
+        /** PublicWork */
+        PublicWork: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "image" | "video";
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /**
+             * Published At
+             * Format: date-time
+             */
+            published_at: string;
+        };
+        /** PublicationRequest */
+        PublicationRequest: {
+            /** Public */
+            public: boolean;
         };
         /** RenderRequest */
         RenderRequest: {
@@ -1596,10 +1866,94 @@ export interface components {
              */
             expected_updated_at: string;
         };
+        /** SkillCreate */
+        SkillCreate: {
+            /** Runtime Key */
+            runtime_key?: "image.outpainting" | null;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Content */
+            content: string;
+        };
+        /** SkillItem */
+        SkillItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Runtime Key */
+            runtime_key?: string | null;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Content */
+            content: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Version */
+            version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** SkillList */
+        SkillList: {
+            /** Items */
+            items: components["schemas"]["SkillItem"][];
+            /** Total */
+            total: number;
+        };
+        /** SkillUpdate */
+        SkillUpdate: {
+            /** Runtime Key */
+            runtime_key?: "image.outpainting" | null;
+            /** Expected Version */
+            expected_version: number;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Content */
+            content: string;
+            /** Enabled */
+            enabled: boolean;
+        };
         /** SubmitTextCompletionRequest */
         SubmitTextCompletionRequest: {
             /** Prompt */
             prompt: string;
+        };
+        /** SystemSettingsResponse */
+        SystemSettingsResponse: {
+            /** Schema Version */
+            schema_version: number;
+            /** Revision */
+            revision: number;
+            assets: components["schemas"]["AssetSettings"];
+        };
+        /** SystemSettingsUpdate */
+        SystemSettingsUpdate: {
+            /** Revision */
+            revision: number;
+            assets: components["schemas"]["AssetSettings"];
         };
         /** TextCompletionErrorBody */
         TextCompletionErrorBody: {
@@ -1774,6 +2128,18 @@ export interface components {
             type: "video";
             /** Clips */
             clips: components["schemas"]["Clip"][];
+        };
+        /** WorkPublication */
+        WorkPublication: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Public */
+            public: boolean;
+            /** Can Publish */
+            can_publish: boolean;
         };
     };
     responses: never;
@@ -2266,6 +2632,223 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminRender"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_skills_api_v1_admin_skills_get: {
+        parameters: {
+            query?: {
+                q?: string;
+                enabled?: boolean | null;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_skill_api_v1_admin_skills_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_skill_api_v1_admin_skills__skill_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_skill_api_v1_admin_skills__skill_id__delete: {
+        parameters: {
+            query: {
+                expected_version: number;
+            };
+            header?: never;
+            path: {
+                skill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_skill_api_v1_admin_skills__skill_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_system_settings_api_v1_admin_system_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettingsResponse"];
+                };
+            };
+        };
+    };
+    update_system_settings_api_v1_admin_system_settings_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SystemSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettingsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2799,6 +3382,26 @@ export interface operations {
             };
         };
     };
+    list_model_catalog_api_v1_admin_model_catalog_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderCatalogList"];
+                };
+            };
+        };
+    };
     list_model_configs_api_v1_admin_model_configs_get: {
         parameters: {
             query?: never;
@@ -2958,6 +3561,7 @@ export interface operations {
         parameters: {
             query?: {
                 kind?: string | null;
+                offset?: number;
             };
             header?: never;
             path: {
@@ -3122,6 +3726,70 @@ export interface operations {
             };
         };
     };
+    read_asset_deletion_api_v1_projects__project_id__assets__asset_id__deletion_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_project_asset_api_v1_projects__project_id__assets__asset_id__deletion_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     save_generation_input_api_v1_projects__project_id__generation_inputs_post: {
         parameters: {
             query?: never;
@@ -3175,6 +3843,177 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImageEditorOption"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    outpaint_debug_manifest_api_v1_projects__project_id__generation_tasks__task_id__outpaint_debug_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string | null;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publications_api_v1_projects__project_id__assets_publication_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkPublication"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_api_v1_projects__project_id__assets__asset_id__publication_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkPublication"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    public_works_api_v1_public_users__user_id__works_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                kind?: ("image" | "video") | null;
+            };
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicWork"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    public_content_api_v1_public_users__user_id__works__asset_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                Range?: string | null;
+            };
+            path: {
+                user_id: string;
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
