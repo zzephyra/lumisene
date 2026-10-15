@@ -2,6 +2,10 @@
 
 import asyncio
 
+from app.infrastructure.ai.adapters.langchain_chat import LangChainCreativeChat
+from app.modules.chat.service import ChatService
+from app.modules.projects.service import ProjectService
+from app.modules.auth.service import AuthService
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.infrastructure.ai.text_completion import TextCompletionService
@@ -16,10 +20,13 @@ async def _run() -> None:
     engine = create_db_engine(settings)
     session_factory = create_session_factory(engine)
     service = TextCompletionService(settings, session_factory=session_factory)
+    chat = ChatService(settings, ProjectService(AuthService(settings)), session_factory, LangChainCreativeChat())
     logger.info("text_completion_worker_started")
     try:
         while True:
             completion_ids = await service.queued_ids()
+            for turn_id in await chat.queued_ids():
+                await chat.execute(turn_id)
             if not completion_ids:
                 await asyncio.sleep(1)
                 continue

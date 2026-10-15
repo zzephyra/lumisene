@@ -45,6 +45,7 @@ export function GenerationPage({
   prompt,
   setPrompt,
   referenceAsset = null,
+  editAsset = null,
   onClearReference,
 }: {
   projectId: string;
@@ -53,6 +54,7 @@ export function GenerationPage({
   prompt: string;
   setPrompt: (value: string) => void;
   referenceAsset?: ReferenceAsset | null;
+  editAsset?: string | null;
   onClearReference?: () => void;
 }) {
   const thumbsRef = useRef<HTMLElement>(null);
@@ -89,7 +91,8 @@ export function GenerationPage({
   const [pending, setPending] = useState(false);
   const [task, setTask] = useState<GenerationTask | null>(null);
   const [history, setHistory] = useState<GenerationTask[]>([]);
-  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(editAsset);
+  useEffect(() => { if (editAsset) { setSelectedAssetId(editAsset); setGenerationType("image"); } }, [editAsset, setGenerationType]);
   useEffect(() => {
     const rail = thumbsRef.current;
     const selected = rail?.querySelector<HTMLElement>(`[data-asset-id="${selectedAssetId}"]`);
@@ -134,7 +137,7 @@ export function GenerationPage({
         const first = items.flatMap((item) =>
           item.status === "succeeded" ? item.output_asset_ids : [],
         )[0];
-        setSelectedAssetId(first ?? null);
+        setSelectedAssetId(generationType === "image" && editAsset ? editAsset : first ?? null);
         const latest = items[0] ?? null;
         setTask(latest);
         const active =
@@ -143,7 +146,7 @@ export function GenerationPage({
           latest?.status === "running" ||
           latest?.status === "cancel_requested";
         setPending(active);
-        setAwaitingResult(active);
+        setAwaitingResult(active && !editAsset);
       })
       .catch(() => undefined);
     return () => controller.abort();

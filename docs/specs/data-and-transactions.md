@@ -99,3 +99,8 @@ editor_admin_audits 与导出取消状态在同一事务提交。取消通过与
 输入读取/绑定与回收使用行锁。回收先确认无任务引用，再标记 deleted 并提交；新任务只允许 ready 输入，防止提交后回收其依赖。所有任务引用（包括终态）都阻止回收。
 
 创作技能运行绑定：creative_skills.runtime_key 与 creative_skill_revisions.runtime_key 归现有 AI 目录。迁移 0017 增加未删除 runtime_key 非空的唯一部分索引；不存在关联时使用 Git 默认，不强制初始化技能行。任务快照在既有 GenerationTask 提交事务中固化，Worker 不跨模块读技能表。
+
+### 创意对话首版实体
+ADR-039 使用 chat_conversations 与 chat_turns，后者成对保存 prompt/reply、结构化 intent、模型配置快照和上下文快照。会话项目复合外键、会话内 request_id 唯一、活动回合部分唯一索引。历史只选成功回合，数据库为真值。
+
+对话图片关联：chat_turns.generation_task_id 可空，外键关联 generation_tasks。提交时锁定项目内消息，图片任务和消息关联在同一 UoW 提交，避免重复点击创建多份作品。

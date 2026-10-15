@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.modules.chat.router import router as chat_router
 from app.api.public_works import router as public_works_router
 from app.api.skills import router as skills_router
 from app.api.system_settings import router as system_settings_router
@@ -73,6 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(text_completions_router)
     app.include_router(generation_router)
     app.include_router(public_works_router)
+    app.include_router(chat_router)
     app.include_router(editor_router)
     app.include_router(uploads_router)
     return app

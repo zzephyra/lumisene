@@ -6,7 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import { Workspace } from "./workspace";
 import { creativePresets } from "./presets";
 import type { Project } from "../types";
-vi.mock("../../auth", () => ({ AccountMenu: () => <button>账户菜单</button> }));
+vi.mock("../../auth", () => ({ AccountMenu: () => <button>账户菜单</button>, useSession: () => ({ data: { id: "owner" } }) }));
+vi.mock("../../chat/api", () => ({ listConversations: vi.fn().mockResolvedValue([]), listTurns: vi.fn().mockResolvedValue([]) }));
 vi.mock("../../profile", () => ({ ProfilePage: () => <h1>个人主页</h1> }));
 const project: Project = { id: "11111111-1111-4111-8111-111111111111", name: "远行计划", role: "OWNER", kind: "standard", version: 1, created_at: "2026-09-27", updated_at: "2026-09-27" };
 function setup(suffix = "") {
@@ -16,13 +17,13 @@ function setup(suffix = "") {
   return user;
 }
 describe("Workspace", () => {
-  it("fills a preset and previews it without claiming an AI response", async () => {
+  it("fills a preset without sending a message automatically", async () => {
     const user = setup();
     await user.click(screen.getByRole("button", { name: /把灵感写成故事/ }));
     expect(screen.getByRole("textbox", { name: "创作需求" })).toHaveValue(creativePresets[0].prompt);
     expect(screen.getByRole("textbox", { name: "创作需求" })).toHaveFocus();
-    await user.click(screen.getByRole("button", { name: "预览创作需求" }));
-    expect(within(screen.getByRole("dialog")).getByText(/尚未发送给 AI/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发送消息" })).toBeEnabled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
   it("fills a world-building draft from a concept reference card", async () => {
     const user = setup();
@@ -38,7 +39,7 @@ describe("Workspace", () => {
     await user.click(within(nav).getByRole("link", { name: "资产" }));
     expect(within(nav).getByRole("link", { name: "资产" })).toHaveAttribute("aria-current", "page");
     expect(within(nav).getByRole("link", { name: "创作" })).not.toHaveAttribute("aria-current");
-    expect(screen.getByText(/当前未查询真实作品/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "资产" })).toBeInTheDocument();
     await user.click(within(nav).getByRole("link", { name: "创作" }));
     expect(screen.getByRole("textbox", { name: "创作需求" })).toHaveValue("只属于本项目的灵感");
   });

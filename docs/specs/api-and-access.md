@@ -194,3 +194,8 @@ Skill 执行层扩展（ADR-033）：管理 DTO 新增可空 runtime_key，当�
 
 ### 公开作品
 ADR-038：项目资产 publication GET/PATCH 需要成员鉴权，PATCH 仅作者并校验 CSRF。匿名 `/api/v1/public/users/{user_id}/works` 分页读取显式公开的有效作品，`/works/{asset_id}/content` 每次重新校验可见性。公开 DTO 不包含邮箱、提示词、项目 ID 或对象键。
+
+### 创意对话首版
+按 ADR-039，P/conversations GET/POST 和 P/conversations/{id}/turns GET/POST 提供持久会话；创建会话与回合使用客户端 UUID 幂等，写请求校验 CSRF。列表 offset 分页每页 50，回合倒序返回；前端按时间展示。暂不开放 RAG/记忆/SSE 参数。所有路由要求项目成员权限。
+
+对话内图片生成：`POST /api/v1/projects/{project_id}/conversations/{conversation_id}/turns/{turn_id}/image`，需 CSRF 与项目写权限，只接受成功的图片方案。返回 TurnResponse 的 generation_task_id；同一消息重复提交返回相同任务。状态和内容复用既有 generation-tasks 与 assets 接口。

@@ -60,6 +60,8 @@ services:
       S3_SECRET_ACCESS_KEY: fluxora-local-secret
       REDIS_URL: redis://redis:6379/0
       SYSTEM_DEFAULTS_FILE: /config/system-defaults.json
+      LOG_DIR: /var/log/fluxora
+      LOG_SERVICE: api
     env_file:
       - path: .env
         required: false
@@ -75,6 +77,7 @@ services:
     volumes:
       - ./backend:/app
       - ./config/system-defaults.json:/config/system-defaults.json:ro
+      - ./logs:/var/log/fluxora
     command:
       - sh
       - -c
@@ -101,6 +104,14 @@ services:
       DATABASE_URL: postgresql+asyncpg://fluxora:fluxora@postgres:5432/fluxora
       DATABASE_CONNECT_TIMEOUT_SECONDS: "5"
       MODEL_SECRET_REFS: qianwen,local_model_secret,wan_video
+      # Creative chat submits image tasks through the same storage configuration.
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: fluxora
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: fluxora
+      S3_SECRET_ACCESS_KEY: fluxora-local-secret
+      LOG_DIR: /var/log/fluxora
+      LOG_SERVICE: text-worker
     env_file:
       - path: .env
         required: false
@@ -109,6 +120,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - ./logs:/var/log/fluxora
     command:
       - python
       - -m
@@ -131,6 +143,8 @@ services:
       S3_SECRET_ACCESS_KEY: fluxora-local-secret
       REDIS_URL: redis://redis:6379/0
       SYSTEM_DEFAULTS_FILE: /config/system-defaults.json
+      LOG_DIR: /var/log/fluxora
+      LOG_SERVICE: image-worker
     env_file:
       - path: .env
         required: false
@@ -146,6 +160,7 @@ services:
     volumes:
       - ./backend:/app
       - ./config/system-defaults.json:/config/system-defaults.json:ro
+      - ./logs:/var/log/fluxora
     command:
       - python
       - -m
@@ -168,6 +183,8 @@ services:
       S3_SECRET_ACCESS_KEY: fluxora-local-secret
       REDIS_URL: redis://redis:6379/0
       SYSTEM_DEFAULTS_FILE: /config/system-defaults.json
+      LOG_DIR: /var/log/fluxora
+      LOG_SERVICE: video-worker
     env_file:
       - path: .env
         required: false
@@ -183,6 +200,7 @@ services:
     volumes:
       - ./backend:/app
       - ./config/system-defaults.json:/config/system-defaults.json:ro
+      - ./logs:/var/log/fluxora
     command:
       - python
       - -m
@@ -203,6 +221,8 @@ services:
       S3_REGION: us-east-1
       S3_ACCESS_KEY_ID: fluxora
       S3_SECRET_ACCESS_KEY: fluxora-local-secret
+      LOG_DIR: /var/log/fluxora
+      LOG_SERVICE: editor-worker
     env_file:
       - path: .env
         required: false
@@ -215,6 +235,7 @@ services:
       - "minio:host-gateway"
     volumes:
       - ./backend:/app
+      - ./logs:/var/log/fluxora
     command:
       - python
       - -m

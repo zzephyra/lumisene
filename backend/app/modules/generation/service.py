@@ -122,6 +122,7 @@ class ImageGenerationService:
         parameters: dict,
         idempotency_key: str,
         input_id: UUID | None = None,
+        commit: bool = True,
     ) -> GenerationTask:
         key = _clean_key(idempotency_key)
         cleaned = _clean_prompt(prompt)
@@ -209,8 +210,11 @@ class ImageGenerationService:
         uow.session.add(row)
         try:
             await uow.session.flush()
-            await uow.commit()
+            if commit:
+                await uow.commit()
         except IntegrityError:
+            if not commit:
+                raise
             await uow.rollback()
             raced = await _by_key(uow.session, project_id, actor_id, key)
             if raced is None:

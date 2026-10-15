@@ -27,6 +27,7 @@
 | 已删除内容清理 | 标记后 7 天清理对象/正文；标记后立即禁止读取 |
 | 成功事件/幂等墓碑/任务诊断 | 完成后 30 天；未完成事件不得按期限删除 |
 | 备份 / 目标恢复 | 每日备份并启用 PG 连续日志归档；上线验收目标 RPO<=1小时、RTO<=4小时 |
+| 应用日志文件 | 默认保留 7 天，由 `LOG_RETENTION_DAYS` 调整；本地目录为 `logs` |
 
 活动并发上限在 PG 中通过项目锁/原子计数检查，不能只依赖可丢失 Redis。Redis 限流不可用时，登录和新模型提交返回 503；普通 PG 读取仍可用。此限制是资源保护，不是 Credits/Quota 账本。
 
@@ -34,7 +35,7 @@
 
 ## 3. 部署与启动
 
-本地 docker-compose.yml 启动 PostgreSQL、Redis、Elasticsearch、MinIO、API、Worker 和前端开发服务器。PostgreSQL、Elasticsearch 和 MinIO 分别使用 `postgres_data`、`elasticsearch_data` 和 `minio_data` 命名卷保存开发数据，普通停止、启动或重建容器不会删除；`docker compose down -v` 会显式删除这些卷。开发 Compose 在启动 API 前执行 Alembic upgrade；镜像默认命令只启动进程，生产仍按发布顺序单独迁移。`make test` 执行已有测试，`make run` 仍可在宿主机启动 API。本地命名卷不等同于生产备份与恢复方案。
+本地 docker-compose.yml 启动 PostgreSQL、Redis、Elasticsearch、MinIO、API、Worker 和前端开发服务器。PostgreSQL、Elasticsearch 和 MinIO 分别使用 `postgres_data`、`elasticsearch_data` 和 `minio_data` 命名卷保存开发数据，普通停止、启动或重建容器不会删除；`docker compose down -v` 会显式删除这些卷。API 与 Worker 的 JSON 日志同时写入宿主机 `logs/`，按 `LOG_RETENTION_DAYS` 保留，默认 7 天；修改天数后重新创建进程生效。开发 Compose 在启动 API 前执行 Alembic upgrade；镜像默认命令只启动进程，生产仍按发布顺序单独迁移。`make test` 执行已有测试，`make run` 仍可在宿主机启动 API。本地命名卷不等同于生产备份与恢复方案。
 
 业务完成后提供独立 API、Worker、Dispatcher、恢复调度器命令，均使用相同代码版本。队列按 video/ingestion/indexing/chat 分离；批量重建限流，不能饿死对话。Redis 不配置 Celery result backend。
 
@@ -124,3 +125,16 @@ CI 分阶段启用 Ruff/pytest、后端类型检查（固定使用 mypy，接入
 ADR-027：图片操作统一使用图片生成模型，视频操作统一使用视频生成模型。image_inpaint/image_to_video 仅表示操作类型，不再提供独立指定或新配置类别；历史记录保留且不影响新请求，已排队任务保持原模型快照。Qwen Image 3.0 的选区通过参考图引导，再由应用蒙版合成保证区域外不变，不宣称供应商原生支持 mask。
 
 Skill Layer：image.outpainting 已在既有任务/Worker 链路内接入，支持 Git 默认模板、后台显式绑定、停用准入与不可变任务快照。image.inpainting/video.image_to_video 暂仅预留路由，仍沿用原流程；SceneAnalyzer 尚无生产实现；A/B 分流、自动规划及技能成本/成功率后台尚未实现。本轮验证使用模拟 Provider，不能证明真实模型扩图视觉质量。
+
+### LangChain 创意对话（ADR-039）
+- 安装锁定依赖后，迁移 `0020_creative_chat`；重启 API 与 text-worker。
+- 在 `backend/model-endpoints.yaml` 按 `model-endpoints.example.yaml` 的 deepseek 配置填写服务端密钥。官方默认入口 https://api.deepseek.com，模型 deepseek-chat。密钥不得提交到仓库。
+- 后台模型目录登记 deepseek-chat / text_generation，再在业务指定中将文本生成指定为该配置。后续换模型也通过业务指定，不修改前端。
+- 会话基础链路及 JSON 输出由模拟供应商测试验证；没有真实 DeepSeek 密钥时不能声称语义准确率或真实模型连通已验收。
+- 暂不支持 RAG 或图片附件，图片意图支持消息内点击生成，视频意图仍进入现有生成页确认后执行。
+
+对话使用 LangChain astream 接收模型增量，只解析 reply 文本；Worker 每至多 300ms 保存部分回复，前端每 400ms 读取活动回合并逐步显示。不是 SSE 推送。完整结果校验成功前不展示生成方案；中断保留部分文字，禁止自动重发付费请求。
+
+对话图片交互更新：用户已授权识别图片生成意图后直接生成。Worker 在新回复完成校验时，同事务创建图片任务并关联消息；历史读取不触发生成，失败仅显式重试。文字在图片容器外，生成期间复用动画骨架，工具栏位于回复底部。
+
+自动图片生成要求 text-worker 与 api、image-worker 使用一致的对象存储配置；部署更新 environment 后需重建容器，单纯 restart 不会载入新的环境变量。

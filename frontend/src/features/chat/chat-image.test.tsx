@@ -1,0 +1,21 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
+import { expect, it, vi } from "vitest";
+import { ChatImage } from "./chat-image";
+import { apiRequest } from "../../lib/api";
+import { getImageGeneration } from "../projects/image-generation";
+vi.mock("../../lib/api", () => ({ apiRequest: vi.fn(), userFacingMessage: () => "失败" }));
+vi.mock("../projects/image-generation", () => ({ getImageGeneration: vi.fn(), assetContentPath: () => "/image.png" }));
+it("creates inline, renders the result and links to the selected image editor", async () => {
+  vi.mocked(apiRequest).mockResolvedValue({ generation_task_id: "task" });
+  vi.mocked(getImageGeneration).mockResolvedValue({ id: "task", kind: "image", status: "succeeded", output_asset_ids: ["asset"], prompt: "cat", error: null, allowed_actions: [] });
+  render(<QueryClientProvider client={new QueryClient()}><MemoryRouter><ChatImage projectId="p" conversationId="c" turnId="t" taskId={null} /></MemoryRouter></QueryClientProvider>);
+  expect(apiRequest).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "重新生成图片" }));
+  expect(await screen.findByAltText("对话生成的图片")).toHaveAttribute("src", "/image.png");
+  expect(screen.getByRole("link", { name: "编辑图片" })).toHaveAttribute("href", "/projects/p/generation?editAsset=asset");
+  expect(apiRequest).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("button", { name: "重新生成图片" })).not.toBeInTheDocument();
+});

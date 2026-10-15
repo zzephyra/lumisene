@@ -12,6 +12,7 @@ from app.infrastructure.ai.models import (
 from app.infrastructure.ai.skills import Skill, SkillRevision
 from app.infrastructure.db.base import Base
 from app.infrastructure.outbox.models import OutboxEvent
+from app.modules.chat.models import Conversation, ChatTurn
 from app.modules.auth.models import User, UserAdminAudit, UserSession
 from app.modules.editor.models import EditorAdminAudit, EditorDocument, EditorRender
 from app.modules.generation.models import (
@@ -39,6 +40,7 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 registered_tables = {
+    Conversation.__tablename__, ChatTurn.__tablename__,
     Skill.__tablename__, SkillRevision.__tablename__,
     EditorDocument.__tablename__,
     EditorRender.__tablename__,

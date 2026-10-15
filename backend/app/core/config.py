@@ -20,6 +20,7 @@ LOCAL_DEV_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 SECRET_REF_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+LOG_SERVICE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 PARAMETER_NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 INPUT_MODALITIES = frozenset({"text", "image", "video", "audio"})
 CONFIGURABLE_CAPABILITIES = frozenset(
@@ -121,6 +122,10 @@ class Settings(BaseSettings):
 
     environment: EnvironmentName = "development"
     log_level: str = "INFO"
+    # Local JSON logs. An empty directory disables the file and keeps stdout only.
+    log_dir: str = "logs"
+    log_retention_days: int = Field(default=7, ge=1, le=3650)
+    log_service: str = ""
     database_url: str = "postgresql+asyncpg://fluxora:fluxora@localhost:5432/fluxora"
     database_connect_timeout_seconds: float = 5.0
     session_ttl_seconds: int = Field(default=7 * 24 * 60 * 60, gt=0)
@@ -154,6 +159,18 @@ class Settings(BaseSettings):
     video_max_size: int = Field(default=512 * 1024 * 1024, gt=0)
     file_max_size: int = Field(default=50 * 1024 * 1024, gt=0)
     _parsed_endpoints: dict[str, ModelEndpoint] = PrivateAttr(default_factory=dict)
+
+    @field_validator("log_dir", "log_service")
+    @classmethod
+    def plain_log_setting(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("log_service")
+    @classmethod
+    def service_log_name(cls, value: str) -> str:
+        if value and LOG_SERVICE_NAME.fullmatch(value) is None:
+            raise ValueError("log_service is invalid")
+        return value
 
     @property
     def is_testing(self) -> bool:

@@ -160,6 +160,16 @@ class OpenAICompatibleImages:
         count: int = 1,
         reference_images: list[str] | None = None,
     ) -> list[tuple[bytes, str]]:
+        if model in QWEN_NATIVE_EDIT_MODELS:
+            return await self._edit_qwen_native(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                instructions=prompt,
+                references=reference_images or [],
+                size=(size or "1024*1024").replace("x", "*"),
+                count=count,
+            )
         url = base_url.rstrip("/") + "/images/generations"
         payload: dict[str, Any] = {
             "model": model,
@@ -389,6 +399,7 @@ class OpenAICompatibleImages:
         instructions: str,
         references: list[str],
         size: str,
+        count: int = 1,
     ) -> list[tuple[bytes, str]]:
         payload = {
             "model": model,
@@ -404,7 +415,7 @@ class OpenAICompatibleImages:
                 ]
             },
             "parameters": {
-                "n": 1,
+                "n": count,
                 "size": size,
                 "prompt_extend": False,
                 "watermark": False,
@@ -437,7 +448,7 @@ class OpenAICompatibleImages:
         urls = _native_image_urls(body)
         if not urls:
             raise ProviderError("图片编辑服务未返回图片")
-        return [await self._download(urls[0])]
+        return [await self._download(url) for url in urls[:count]]
 
     async def _download(self, url: str) -> tuple[bytes, str]:
         _validate_image_url(url)

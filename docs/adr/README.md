@@ -49,3 +49,5 @@
 - [037：统一万相图像编辑模型](037-unified-image-editing.md)
 
 - [038 — 公开作品与个人主页](038-public-works.md)
+
+- [039 — LangChain 创意对话](039-langchain-creative-chat.md)

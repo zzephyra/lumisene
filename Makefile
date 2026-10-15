@@ -7,7 +7,7 @@ test:
 	cd backend && uv run pytest
 
 run:
-	cd backend && uv run uvicorn app.main:app --reload
+	cd backend && LOG_DIR="$(CURDIR)/logs" uv run uvicorn app.main:app --reload
 
 migrate:
 	cd backend && uv run alembic upgrade head
