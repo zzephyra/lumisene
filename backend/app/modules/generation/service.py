@@ -1,4 +1,3 @@
-
 """Queue one explicit image generation and finish it outside the request transaction."""
 
 import asyncio
@@ -104,10 +103,11 @@ class ImageGenerationService:
         session_factory: async_sessionmaker[AsyncSession] | None = None,
         client: ImageClient | None = None,
         storage: ObjectStorage | None = None,
+        image_edit_client: WanImageEditing | None = None,
     ) -> None:
         self.settings = settings
         self.outpaint_client = NativeOutpainting()
-        self.image_edit_client = WanImageEditing()
+        self.image_edit_client = image_edit_client or WanImageEditing()
         self.session_factory = session_factory
         self.client = client or OpenAICompatibleImages()
         self.storage = storage or build_object_storage(settings)

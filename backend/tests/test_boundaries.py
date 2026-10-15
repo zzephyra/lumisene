@@ -2,8 +2,10 @@ from pathlib import Path
 
 APP = Path(__file__).resolve().parents[1] / "app"
 INFRASTRUCTURE = APP / "infrastructure"
+ADAPTERS = INFRASTRUCTURE / "ai" / "adapters"
 MODULES = APP / "modules"
 FORBIDDEN_IMPORTS = ("fastapi", "langchain", "celery", "openai")
+ADAPTER_SDKS = {"langchain", "openai"}
 
 
 def test_ports_do_not_import_frameworks_or_provider_sdks() -> None:
@@ -13,6 +15,8 @@ def test_ports_do_not_import_frameworks_or_provider_sdks() -> None:
             continue
         text = path.read_text(encoding="utf-8")
         for name in FORBIDDEN_IMPORTS:
+            if name in ADAPTER_SDKS and ADAPTERS in path.parents:
+                continue
             if f"import {name}" in text or f"from {name}" in text:
                 offenders.append(f"{path.name}: {name}")
     assert offenders == []

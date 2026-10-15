@@ -85,7 +85,7 @@ CI 分阶段启用 Ruff/pytest、后端类型检查（固定使用 mypy，接入
 - `0001_baseline` 仍是空迁移。`0002_auth_and_projects` 创建 users、sessions、projects、project_members 和 outbox_events。`0003_model_configs` 增加 users.platform_admin、model_configs 和 model_config_audits。`0004_text_completions` 增加一次文本补全记录。`0005_image_generations` 增加生成任务和资产，`0006_model_assignments` 增加业务指定，`0007_video_generations` 为生成任务增加 image/video 种类并允许视频的 submitting 状态。`0008_personal_spaces` 为 projects 增加 kind，并用部分唯一索引保证每个创建者至多一个未删除的个人空间；不回填、不搬迁已有项目。event_deliveries 尚未创建。Celery 仍未接入。
 - 文生视频适配器会提交并轮询 DashScope 异步任务，成片写入对象存储。供应商取消接口未接入，因此 submitting 和 running 的取消返回 409，不进入 cancel_requested。
 - ParsedDocument 目前只有 text，必须扩展 blocks/locator 才能提供可核验引用。
-- 当前边界测试扫描整个非 DB infrastructure，会误禁合法 LangChain 适配器；实施 AI 接入时修正测试范围。
+- 边界测试允许 `infrastructure/ai/adapters` 导入 LangChain 与供应商 SDK，其余 infrastructure 仍禁止这些依赖。
 - 身份和项目的外层 Service 已拥有并提交同一个 UoW，项目模块通过 auth Service 读取用户。Worker 工厂的完整生命周期仍未落实。
 - 校验错误不再回显原始输入。登录限流尚未接入；Redis 不可用时登录应返回 503，这项仍待实现。
 - 登录页、项目列表、工作台和模型目录管理页可由前端开发服务器使用，并代理 `/api`。模型目录登记、停用和恢复配置，并为每项业务指定一个模型。文本补全和图片生成由独立进程领取 queued 记录后调用 OpenAI 兼容接口；图片字节进入私有对象存储。文生视频由 video-worker 领取，调用已指定的 text_to_video 适配器后把视频字节写入对象存储。Celery、Outbox Dispatcher、RAG 和记忆均待实施。后端 pytest 与腾讯云 Compose 更新已接入 GitHub Actions；Ruff、类型检查、前端检查，以及生产私网、TLS 和备份验收仍待实施。项目删除已写入 `project.deleted.v1`，尚无消费者。

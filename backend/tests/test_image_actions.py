@@ -52,13 +52,38 @@ def setup(client, settings):
             headers=_mutation_headers(client, settings),
         )
         assert response.status_code == 200
+    wan = _publish(client, settings, model_name="wanx2.1-imageedit", capability="image_inpaint")
+    assert wan["model_name"] == "wanx2.1-imageedit"
     return project
 
 
-def upload(client, settings, project, mask=None):
+def wan_config_id(client) -> str:
+    items = client.get("/api/v1/admin/model-configs").json()["items"]
+    return next(item["id"] for item in items if item["model_name"] == "wanx2.1-imageedit")
+
+
+class WanEditDouble:
+    def __init__(self, operation: str, image: bytes) -> None:
+        self.operation = operation
+        self.image = image
+
+    async def submit(self, **kwargs):
+        assert kwargs["operation"] == self.operation
+        if self.operation == "image_inpaint":
+            assert kwargs["mask"]
+        else:
+            assert kwargs.get("mask") is None
+        return "wan-edit-task"
+
+    async def poll(self, **kwargs):
+        assert kwargs["task_id"] == "wan-edit-task"
+        return "succeeded", (self.image, "image/png")
+
+
+def upload(client, settings, project, mask=None, size=(256, 256)):
     body = {
         "id": str(uuid4()),
-        "image_base64": b64(picture()),
+        "image_base64": b64(picture(size=size)),
         "mask_base64": b64(mask) if mask else None,
     }
     response = client.post(
@@ -89,13 +114,6 @@ def submit(client, settings, project, input_id, kind, key="one"):
     )
 
 
-class EditedImages:
-    async def edit(self, **kwargs):
-        assert kwargs["model"] == "gpt-image-1"
-        assert Image.open(BytesIO(kwargs["mask"])).getpixel((0, 0)) == 255
-        return [(picture("blue"), "image/png")]
-
-
 class ImageVideo:
     async def submit(self, **kwargs):
         assert kwargs["image"].startswith(b"\x89PNG")
@@ -109,18 +127,26 @@ class ImageVideo:
 def test_inpaint_and_video_complete_with_project_scoped_results(image_api):  # noqa: F811
     client, settings, storage = image_api
     project = setup(client, settings)
-    options = client.get(f"/api/v1/projects/{project}/image-editor-options").json()
-    assert all(item["available"] for item in options if item["capability"] != "image_outpaint")
-    mask = Image.new("L", (256, 256), 0)
-    mask.paste(255, (0, 0, 128, 256))
+    options = {
+        item["capability"]: item
+        for item in client.get(f"/api/v1/projects/{project}/image-editor-options").json()
+    }
+    assert options["image_inpaint"]["available"] is True
+    assert options["image_inpaint"]["model_name"] == "wanx2.1-imageedit"
+    assert options["image_to_image"]["model_name"] == "wanx2.1-imageedit"
+    assert options["image_outpaint"]["available"] is True
+    assert options["image_to_video"]["available"] is True
+    mask = Image.new("L", (512, 512), 0)
+    mask.paste(255, (0, 0, 256, 512))
     stream = BytesIO()
     mask.save(stream, "PNG")
-    image_input = upload(client, settings, project, stream.getvalue())
+    image_input = upload(client, settings, project, stream.getvalue(), size=(512, 512))
     queued = submit(client, settings, project, image_input, "image")
     assert queued.status_code == 202, queued.text
     task_id = queued.json()["id"]
     active = client.get(f"/api/v1/projects/{project}/active-model?capability=text_to_image").json()
-    assert queued.json()["model_config_id"] == active["id"]
+    assert queued.json()["model_config_id"] == wan_config_id(client)
+    assert queued.json()["model_config_id"] != active["id"]
     # Reassigning the global model must not change an already queued task.
     replacement = _publish(
         client, settings, model_name="qwen-image-3.0", capability="text_to_image"
@@ -134,12 +160,19 @@ def test_inpaint_and_video_complete_with_project_scoped_results(image_api):  # n
         == 200
     )
 
+    edited = picture("blue", (512, 512))
+
     async def run():
         engine = create_db_engine(settings)
         try:
-            await ImageGenerationService(
-                settings, create_session_factory(engine), EditedImages(), storage
-            ).execute(UUID(task_id))
+            service = ImageGenerationService(
+                settings,
+                create_session_factory(engine),
+                storage=storage,
+                image_edit_client=WanEditDouble("image_inpaint", edited),
+            )
+            await service.execute(UUID(task_id))
+            await service.poll_outpaints()
         finally:
             await engine.dispose()
 
@@ -158,9 +191,7 @@ def test_inpaint_and_video_complete_with_project_scoped_results(image_api):  # n
     content = client.get(
         f"/api/v1/projects/{project}/assets/{result['output_asset_ids'][0]}/content"
     ).content
-    edited = Image.open(BytesIO(content))
-    assert edited.getpixel((0, 0))[:3] == (0, 0, 255)
-    assert edited.getpixel((200, 0))[:3] == (255, 0, 0)
+    assert content == edited
     video_input = upload(client, settings, project)
     video = submit(client, settings, project, video_input, "video", "video")
     assert video.status_code == 202, video.text
@@ -377,6 +408,8 @@ def test_qwen_image_2_edit_uses_native_multimodal_references():
         )
     )
     assert result[0][0] == picture("blue")
+
+
 def test_qwen_image_3_edit_uses_compatible_image_references():
     from app.infrastructure.ai.adapters.openai_images import OpenAICompatibleImages
 
@@ -402,6 +435,8 @@ def test_qwen_image_3_edit_uses_compatible_image_references():
         )
     )
     assert result[0][0] == picture("blue")
+
+
 def test_qwen_native_size_aligns_edges_and_keeps_area_in_range():
     from app.infrastructure.ai.adapters.openai_images import _qwen_native_size
 
@@ -427,7 +462,7 @@ def test_no_separate_media_assignment_and_qwen_is_available(image_api):  # noqa:
     )
     options = client.get(f"/api/v1/projects/{project}/image-editor-options").json()
     assert options[0]["available"] is True
-    assert options[0]["model_name"] == "qwen-image-3.0"
+    assert options[0]["model_name"] == "wanx2.1-imageedit"
     assignments = client.get("/api/v1/admin/model-assignments").json()["items"]
     assert not {"image_inpaint", "image_to_video"} & {item["capability"] for item in assignments}
     assert (
@@ -438,9 +473,10 @@ def test_no_separate_media_assignment_and_qwen_is_available(image_api):  # noqa:
         ).status_code
         == 422
     )
-    input_id = upload(client, settings, project, picture("white"))
+    input_id = upload(client, settings, project, picture("white", (512, 512)), size=(512, 512))
     task = submit(client, settings, project, input_id, "image").json()
-    assert task["model_config_id"] == model["id"]
+    assert task["model_config_id"] == wan_config_id(client)
+    assert task["model_config_id"] != model["id"]
 
 
 def test_large_inpaint_preserves_original_and_bounds_provider_copy():
@@ -583,24 +619,23 @@ def test_unchanged_inpaint_is_not_reported_as_success():
 def test_reference_image_uses_unified_image_model_without_mask(image_api):  # noqa: F811
     client, settings, storage = image_api
     project = setup(client, settings)
-    input_id = upload(client, settings, project)
+    input_id = upload(client, settings, project, size=(512, 512))
     queued = submit(client, settings, project, input_id, "image")
     assert queued.status_code == 202, queued.text
+    assert queued.json()["model_config_id"] == wan_config_id(client)
     assert submit(client, settings, project, input_id, "image").json()["id"] == queued.json()["id"]
-
-    class ReferenceImages:
-        async def reference(self, **kwargs):
-            assert kwargs["model"] == "gpt-image-1"
-            assert kwargs["image"] == picture()
-            assert "mask" not in kwargs
-            return [(picture("blue"), "image/png")]
 
     async def run():
         engine = create_db_engine(settings)
         try:
-            await ImageGenerationService(
-                settings, create_session_factory(engine), ReferenceImages(), storage
-            ).execute(UUID(queued.json()["id"]))
+            service = ImageGenerationService(
+                settings,
+                create_session_factory(engine),
+                storage=storage,
+                image_edit_client=WanEditDouble("image_to_image", picture("blue", (512, 512))),
+            )
+            await service.execute(UUID(queued.json()["id"]))
+            await service.poll_outpaints()
         finally:
             await engine.dispose()
 
