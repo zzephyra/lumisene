@@ -41,7 +41,7 @@
 
 生产发布顺序：验证环境与备份 → 执行兼容迁移 → 部署 API/Worker → 健康检查 → 开启新功能。数据库采用 expand/contract，先加兼容字段、回填、切换代码，后续发布才删旧字段。回滚应用不随意 downgrade 删除业务数据。
 
-GitHub Actions 在 pull request 与 `main` 推送时运行后端 `pytest`。只有 `main` 上的 pytest 通过后，才通过 SSH 把同一提交更新到腾讯云上已有的 Compose 目录：`git fetch` 该提交、分离头检出，再执行 `scripts/deploy-tencent.sh`。部署重建变更的容器并请求本机 `/healthz`，不执行 `docker compose down -v`，也不清理 `.env` 与 `backend/model-endpoints.yaml`。服务器需预先克隆仓库、配置可拉取代码的凭据，且 SSH 用户可运行 Docker。GitHub 仓库保存 `TENCENT_HOST`、`TENCENT_USER`、`TENCENT_SSH_KEY`、`TENCENT_SSH_KNOWN_HOSTS`、`TENCENT_DEPLOY_PATH`；`TENCENT_SSH_PORT` 可省略，默认 22。此流程更新当前 Compose，尚不等于下文要求的生产私网、TLS 与备份验收。
+GitHub Actions 仅在 `main` 与 `develop` 推送时运行后端 `pytest`。只有 `main` 上的 pytest 通过后，才通过 SSH 把同一提交更新到腾讯云上已有的 Compose 目录：`git fetch` 该提交、分离头检出，再执行 `scripts/deploy-tencent.sh`。部署重建变更的容器并请求本机 `/healthz`，不执行 `docker compose down -v`，也不清理 `.env` 与 `backend/model-endpoints.yaml`。服务器需预先克隆仓库、配置可拉取代码的凭据，且 SSH 用户可运行 Docker。GitHub 仓库保存 `TENCENT_HOST`、`TENCENT_USER`、`TENCENT_SSH_KEY`、`TENCENT_SSH_KNOWN_HOSTS`、`TENCENT_DEPLOY_PATH`；`TENCENT_SSH_PORT` 可省略，默认 22。此流程更新当前 Compose，尚不等于下文要求的生产私网、TLS 与备份验收。
 
 健康端点 /healthz 仅表示进程存活；API /readyz 以 PG 与必需配置为准，ES 不可用不应摘除全部普通业务 API。Worker 就绪按其队列依赖检查，搜索功能单独返回降级状态。
 

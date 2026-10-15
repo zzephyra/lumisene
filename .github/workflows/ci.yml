@@ -1,9 +1,8 @@
 name: ci
 
 on:
-  pull_request:
   push:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 permissions:
@@ -11,6 +10,7 @@ permissions:
 
 jobs:
   pytest:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
