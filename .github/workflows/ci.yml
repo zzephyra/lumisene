@@ -123,8 +123,37 @@ jobs:
           quoted_sha="$(printf '%q' "$GITHUB_SHA")"
           quoted_prefix="$(printf '%q' "$IMAGE_PREFIX")"
           quoted_registry_user="$(printf '%q' "$REGISTRY_USER")"
-          printf '%s' "$REGISTRY_TOKEN" | ssh -i ~/.ssh/id_ed25519 \
-            -p "$port" \
-            -o StrictHostKeyChecking=yes \
-            "$DEPLOY_USER@$HOST" \
-            "set -eu; cd $quoted_path; git fetch origin $quoted_sha; git checkout --detach $quoted_sha; bash scripts/deploy-tencent.sh $quoted_prefix $quoted_sha $quoted_registry_user"
+          ssh_cmd() {
+            ssh -i ~/.ssh/id_ed25519 \
+              -p "$port" \
+              -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=20 \
+              -o ServerAliveInterval=15 \
+              -o ServerAliveCountMax=8 \
+              "$DEPLOY_USER@$HOST" \
+              "$@"
+          }
+          # The registry token is consumed into a mode-600 file. The deploy process
+          # is detached so a later SSH reset does not kill an in-progress image pull.
+          printf '%s' "$REGISTRY_TOKEN" | ssh_cmd \
+            "set -eu; umask 077; token_file=\$(mktemp); cat > \"\$token_file\"; cd $quoted_path; git fetch origin $quoted_sha; git checkout --detach $quoted_sha; mkdir -p logs; if [ -f logs/deploy.pid ] && kill -0 \"\$(cat logs/deploy.pid)\" 2>/dev/null; then rm -f \"\$token_file\"; echo already-running; exit 0; fi; rm -f logs/deploy.exit; nohup bash -c 'bash scripts/deploy-tencent.sh \"\$1\" \"\$2\" \"\$3\" < \"\$4\"; code=\$?; rm -f \"\$4\"; echo \"\$code\" > logs/deploy.exit' bash $quoted_prefix $quoted_sha $quoted_registry_user \"\$token_file\" >> logs/deploy.log 2>&1 & echo \$! > logs/deploy.pid"
+          for _ in $(seq 1 120); do
+            if ! state="$(ssh_cmd "cd $quoted_path; if [ -f logs/deploy.exit ]; then cat logs/deploy.exit; else echo RUNNING; fi")"; then
+              echo "SSH to the server failed; the detached deploy keeps running." >&2
+              sleep 30
+              continue
+            fi
+            if [ "$state" = "0" ]; then
+              ssh_cmd "cd $quoted_path; tail -n 40 logs/deploy.log" || true
+              exit 0
+            fi
+            if [ "$state" != "RUNNING" ]; then
+              ssh_cmd "cd $quoted_path; tail -n 80 logs/deploy.log" || true
+              echo "Deployment failed with exit $state." >&2
+              exit 1
+            fi
+            ssh_cmd "cd $quoted_path; tail -n 5 logs/deploy.log" || true
+            sleep 30
+          done
+          echo "Deployment did not finish within 60 minutes." >&2
+          exit 1

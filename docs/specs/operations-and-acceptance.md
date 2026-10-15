@@ -43,9 +43,9 @@
 
 GitHub Actions 在 `main` 与 `develop` 上先运行后端 pytest，再构建 linux/amd64 后端镜像和前端静态镜像，推送到 `ghcr.io/<owner>/<repo>-backend:<commit-sha>` 与 `ghcr.io/<owner>/<repo>-frontend:<commit-sha>`。只有 main 自动部署。CI 使用内置 GITHUB_TOKEN 的 packages:write；CD 用 packages:read，通过 SSH stdin 临时登录 GHCR，凭据目录在脚本退出时清理。无需另设长期 registry token；已有同名私有 Package 时需授予本仓库 Actions 访问权限。
 
-CD 拉取同一 SHA 的代码仅用于读取部署脚本和配置，然后执行 `scripts/deploy-tencent.sh IMAGE_PREFIX COMMIT_SHA REGISTRY_USER`，不编译源码。部署覆盖文件 `docker-compose.deploy.yml` 移除源码挂载和 build，保留既有命名卷、日志、系统配置与 `backend/model-endpoints.yaml`（此文件需预先存在；`.env` 中可设置 `MODEL_ENDPOINTS_FILE=model-endpoints.yaml`）。镜像中不打包本地密钥。前端通过 Nginx 在原 5173 端口提供静态 SPA 与 API 代理，开发环境仍使用 Vite。
+CD 拉取同一 SHA 的代码仅用于读取部署脚本和配置，然后在服务器上用 `nohup` 启动 `scripts/deploy-tencent.sh IMAGE_PREFIX COMMIT_SHA REGISTRY_USER`，不编译源码。GitHub Actions 的 SSH 只负责启动并轮询 `logs/deploy.exit`；连接被重置时不会终止已经开始的镜像拉取。单次拉取超过 15 分钟没有结束会终止并重试，最多 4 次。部署覆盖文件 `docker-compose.deploy.yml` 移除源码挂载和 build，保留既有命名卷、日志、系统配置与 `backend/model-endpoints.yaml`（此文件需预先存在；`.env` 中可设置 `MODEL_ENDPOINTS_FILE=model-endpoints.yaml`）。镜像中不打包本地密钥。前端通过 Nginx 在原 5173 端口提供静态 SPA 与 API 代理，开发环境仍使用 Vite。
 
-服务器需 Docker Compose >= 2.24.4、amd64 架构、可访问 GHCR 和其他基础镜像仓库。脚本先拉取全部镜像，失败最多尝试四次，全部失败时不更新服务；成功后启动基础服务、使用新后端镜像执行一次 Alembic 迁移，再以 `--no-build --pull never` 更新 API/Worker/前端并检查健康。迁移失败立即退出；不自动回滚数据库。部署串行执行，不执行 `down -v`，不清理服务器配置。网络持续不可达仍需修复网络或迁移镜像仓库，CI 打包不能消除服务器拉取镜像的网络要求。
+服务器需 Docker Compose >= 2.24.4、amd64 架构、可访问 GHCR。Postgres、Redis 和 MinIO 缺镜像时从腾讯云镜像 `mirror.ccs.tencentyun.com` 拉取；服务器上已有的基础镜像不再访问外网仓库。每次发布只强制拉取该提交的 backend 与 frontend 镜像。拉取失败最多尝试四次，全部失败时不更新服务；成功后启动基础服务、使用新后端镜像执行一次 Alembic 迁移，再以 `--no-build --pull never` 更新 API/Worker/前端并检查健康。迁移失败立即退出；不自动回滚数据库。部署串行执行，不执行 `down -v`，不清理服务器配置。私有 GHCR 镜像仍需从 `ghcr.io` 下载缺失层，镜像站不能代替这一步。
 
 保留已有 SSH Secrets：`TENCENT_HOST`、`TENCENT_USER`、`TENCENT_SSH_KEY`、`TENCENT_SSH_KNOWN_HOSTS`、`TENCENT_DEPLOY_PATH`；`TENCENT_SSH_PORT` 默认 22。服务器需预先克隆仓库且 SSH 用户可以拉取代码、运行 Docker。沿用原 Compose 项目名以复用命名卷；手动运维应使用同样的两个 Compose 文件与 IMAGE_PREFIX/IMAGE_TAG 环境变量，不能运行开发 Compose 覆盖线上服务。此改动只调整镜像交付，未替代下文生产私网、TLS、非默认密码及备份验收。
 

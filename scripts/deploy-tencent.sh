@@ -18,12 +18,42 @@ if [ -n "${3:-}" ]; then
   docker login ghcr.io --username "$3" --password-stdin
 fi
 
-# Pull registry images before changing running services. Limit simultaneous pulls
-# and retry transient registry/CDN failures without suppressing the final error.
-export COMPOSE_PARALLEL_LIMIT=1
+# Public Docker Hub images are pulled through the Tencent Cloud mirror. Images
+# already stored on the server are not contacted again. Only the two CI images
+# change every release; a stalled ghcr.io pull is killed instead of left open.
+TENCENT_MIRROR="${TENCENT_MIRROR:-mirror.ccs.tencentyun.com}"
+pull_with_deadline() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 900 docker pull "$1"
+  else
+    docker pull "$1"
+  fi
+}
+pull_missing() {
+  local target="$1"
+  local mirror="${2:-}"
+  if docker image inspect "$target" >/dev/null 2>&1; then
+    echo "already present: $target"
+    return 0
+  fi
+  if [ -n "$mirror" ] && pull_with_deadline "$mirror"; then
+    docker tag "$mirror" "$target"
+    return 0
+  fi
+  pull_with_deadline "$target" || return 1
+}
+pull_release() {
+  pull_missing postgres:16 "$TENCENT_MIRROR/library/postgres:16" || return 1
+  pull_missing redis:7 "$TENCENT_MIRROR/library/redis:7" || return 1
+  pull_missing docker.elastic.co/elasticsearch/elasticsearch:8.15.3 || return 1
+  pull_missing minio/minio:RELEASE.2025-04-22T22-12-26Z \
+    "$TENCENT_MIRROR/minio/minio:RELEASE.2025-04-22T22-12-26Z" || return 1
+  pull_with_deadline "${IMAGE_PREFIX}-backend:${IMAGE_TAG}" || return 1
+  pull_with_deadline "${IMAGE_PREFIX}-frontend:${IMAGE_TAG}" || return 1
+}
 pull_ready=false
 for attempt in 1 2 3 4; do
-  if "${compose[@]}" pull; then
+  if pull_release; then
     pull_ready=true
     break
   fi

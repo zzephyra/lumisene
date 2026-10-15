@@ -16,7 +16,8 @@ class DeployTest(unittest.TestCase):
             docker = path / 'docker'
             docker.write_text('''#!/bin/bash
 printf '%s\\n' "$*" >> "$CALL_LOG"
-if [[ "$*" == *" pull" && "$FAIL_PULL" == 1 ]]; then exit 1; fi
+if [[ "$1 $2" == "image inspect" ]]; then exit 1; fi
+if [[ "$1" == pull && "$FAIL_PULL" == 1 ]]; then exit 1; fi
 if [[ "$1" == login ]]; then cat >/dev/null; printf '%s' "$DOCKER_CONFIG" > "$CONFIG_LOG"; fi
 ''')
             for name in ('curl', 'sleep'):
@@ -41,13 +42,17 @@ if [[ "$1" == login ]]; then cat >/dev/null; printf '%s' "$DOCKER_CONFIG" > "$CO
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn('--build', calls)
         self.assertIn('--no-build --pull never', calls)
-        self.assertLess(calls.index(' pull'), calls.index('alembic upgrade head'))
+        tag = 'a' * 40
+        self.assertLess(calls.index('pull '), calls.index('alembic upgrade head'))
+        self.assertIn('pull mirror.ccs.tencentyun.com/library/postgres:16', calls)
+        self.assertIn(f'pull ghcr.io/test/app-backend:{tag}', calls)
+        self.assertIn(f'pull ghcr.io/test/app-frontend:{tag}', calls)
         self.assertLess(calls.index('alembic upgrade head'), calls.index('--remove-orphans'))
 
     def test_failed_pull_retries_and_never_changes_services(self):
         result, calls = self.run_deploy(fail_pulls=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(calls.count(' pull\n'), 4)
+        self.assertEqual(sum(line.startswith('pull ') for line in calls.splitlines()), 8)
         self.assertNotIn(' up ', calls)
         self.assertNotIn('alembic', calls)
 
