@@ -1,0 +1,68 @@
+# Overlay on docker-compose.yml; requires Docker Compose >= 2.24.4.
+# No source mounts or builds: every application service uses the CI artifact.
+services:
+  api:
+    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-backend:${IMAGE_TAG:?IMAGE_TAG is required}
+    build: !reset null
+    volumes: !override
+      - type: bind
+        source: ./backend/model-endpoints.yaml
+        target: /app/model-endpoints.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./config/system-defaults.json:/config/system-defaults.json:ro
+      - ./logs:/var/log/fluxora
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+  text-worker:
+    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-backend:${IMAGE_TAG:?IMAGE_TAG is required}
+    build: !reset null
+    volumes: !override
+      - type: bind
+        source: ./backend/model-endpoints.yaml
+        target: /app/model-endpoints.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./config/system-defaults.json:/config/system-defaults.json:ro
+      - ./logs:/var/log/fluxora
+  image-worker:
+    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-backend:${IMAGE_TAG:?IMAGE_TAG is required}
+    build: !reset null
+    volumes: !override
+      - type: bind
+        source: ./backend/model-endpoints.yaml
+        target: /app/model-endpoints.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./config/system-defaults.json:/config/system-defaults.json:ro
+      - ./logs:/var/log/fluxora
+  video-worker:
+    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-backend:${IMAGE_TAG:?IMAGE_TAG is required}
+    build: !reset null
+    volumes: !override
+      - type: bind
+        source: ./backend/model-endpoints.yaml
+        target: /app/model-endpoints.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./config/system-defaults.json:/config/system-defaults.json:ro
+      - ./logs:/var/log/fluxora
+  editor-worker:
+    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-backend:${IMAGE_TAG:?IMAGE_TAG is required}
+    build: !reset null
+    volumes: !override
+      - type: bind
+        source: ./backend/model-endpoints.yaml
+        target: /app/model-endpoints.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./config/system-defaults.json:/config/system-defaults.json:ro
+      - ./logs:/var/log/fluxora
+  frontend:
+    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-frontend:${IMAGE_TAG:?IMAGE_TAG is required}
+    build: !reset null
+    volumes: !reset []

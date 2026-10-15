@@ -6,3 +6,7 @@ __pycache__
 .coverage
 htmlcov
 *.pyc
+
+.env
+.env.*
+model-endpoints.yaml

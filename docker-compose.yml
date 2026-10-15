@@ -245,6 +245,7 @@ services:
   frontend:
     build:
       context: ./frontend
+      target: development
     environment:
       VITE_API_PROXY_TARGET: http://api:8000
     ports:
