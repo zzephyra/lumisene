@@ -41,6 +41,8 @@
 
 生产发布顺序：验证环境与备份 → 执行兼容迁移 → 部署 API/Worker → 健康检查 → 开启新功能。数据库采用 expand/contract，先加兼容字段、回填、切换代码，后续发布才删旧字段。回滚应用不随意 downgrade 删除业务数据。
 
+GitHub Actions 在 pull request 与 `main` 推送时运行后端 `pytest`。只有 `main` 上的 pytest 通过后，才通过 SSH 把同一提交更新到腾讯云上已有的 Compose 目录：`git fetch` 该提交、分离头检出，再执行 `scripts/deploy-tencent.sh`。部署重建变更的容器并请求本机 `/healthz`，不执行 `docker compose down -v`，也不清理 `.env` 与 `backend/model-endpoints.yaml`。服务器需预先克隆仓库、配置可拉取代码的凭据，且 SSH 用户可运行 Docker。GitHub 仓库保存 `TENCENT_HOST`、`TENCENT_USER`、`TENCENT_SSH_KEY`、`TENCENT_SSH_KNOWN_HOSTS`、`TENCENT_DEPLOY_PATH`；`TENCENT_SSH_PORT` 可省略，默认 22。此流程更新当前 Compose，尚不等于下文要求的生产私网、TLS 与备份验收。
+
 健康端点 /healthz 仅表示进程存活；API /readyz 以 PG 与必需配置为准，ES 不可用不应摘除全部普通业务 API。Worker 就绪按其队列依赖检查，搜索功能单独返回降级状态。
 
 生产要求：私网数据库/ES/Redis、认证和 TLS、持久卷/托管存储、非默认密钥、对象存储私有、HTTPS 反向代理、受限 CORS、上传大小限制。开发 Compose 的默认密码/开放端口/禁用 ES 安全不能用于生产。
@@ -86,7 +88,7 @@ CI 分阶段启用 Ruff/pytest、后端类型检查（固定使用 mypy，接入
 - 当前边界测试扫描整个非 DB infrastructure，会误禁合法 LangChain 适配器；实施 AI 接入时修正测试范围。
 - 身份和项目的外层 Service 已拥有并提交同一个 UoW，项目模块通过 auth Service 读取用户。Worker 工厂的完整生命周期仍未落实。
 - 校验错误不再回显原始输入。登录限流尚未接入；Redis 不可用时登录应返回 503，这项仍待实现。
-- 登录页、项目列表、工作台和模型目录管理页可由前端开发服务器使用，并代理 `/api`。模型目录登记、停用和恢复配置，并为每项业务指定一个模型。文本补全和图片生成由独立进程领取 queued 记录后调用 OpenAI 兼容接口；图片字节进入私有对象存储。文生视频由 video-worker 领取，调用已指定的 text_to_video 适配器后把视频字节写入对象存储。Celery、Outbox Dispatcher、RAG、记忆、业务 CI 和生产部署均待实施。项目删除已写入 `project.deleted.v1`，尚无消费者。
+- 登录页、项目列表、工作台和模型目录管理页可由前端开发服务器使用，并代理 `/api`。模型目录登记、停用和恢复配置，并为每项业务指定一个模型。文本补全和图片生成由独立进程领取 queued 记录后调用 OpenAI 兼容接口；图片字节进入私有对象存储。文生视频由 video-worker 领取，调用已指定的 text_to_video 适配器后把视频字节写入对象存储。Celery、Outbox Dispatcher、RAG 和记忆均待实施。后端 pytest 与腾讯云 Compose 更新已接入 GitHub Actions；Ruff、类型检查、前端检查，以及生产私网、TLS 和备份验收仍待实施。项目删除已写入 `project.deleted.v1`，尚无消费者。
 
 未列入上面已实现范围的项目仍待后续阶段完成。
 

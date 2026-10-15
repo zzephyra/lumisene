@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/0.8.15/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Run pytest
+        working-directory: backend
+        run: |
+          uv sync --frozen --group dev
+          uv run pytest
+
+  deploy:
+    needs: pytest
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Tencent Cloud
+        env:
+          SSH_KEY: ${{ secrets.TENCENT_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.TENCENT_SSH_KNOWN_HOSTS }}
+          HOST: ${{ secrets.TENCENT_HOST }}
+          USER: ${{ secrets.TENCENT_USER }}
+          PORT: ${{ secrets.TENCENT_SSH_PORT }}
+          DEPLOY_PATH: ${{ secrets.TENCENT_DEPLOY_PATH }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS" && test -n "$HOST" && test -n "$USER" && test -n "$DEPLOY_PATH"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+          port="${PORT:-22}"
+          quoted_path="$(printf '%q' "$DEPLOY_PATH")"
+          quoted_sha="$(printf '%q' "$GITHUB_SHA")"
+          ssh -i ~/.ssh/id_ed25519 \
+            -p "$port" \
+            -o StrictHostKeyChecking=yes \
+            "$USER@$HOST" \
+            "set -eu; cd $quoted_path; git fetch origin $quoted_sha; git checkout --detach $quoted_sha; bash scripts/deploy-tencent.sh"
