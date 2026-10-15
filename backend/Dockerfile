@@ -1,6 +1,6 @@
 FROM python:3.12-slim-bookworm
 
-COPY --from=ghcr.io/astral-sh/uv:0.8.15 /uv /uvx /bin/
+COPY --from=astral/uv:0.8.15 /uv /uvx /bin/
 
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 
