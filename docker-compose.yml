@@ -68,7 +68,7 @@ services:
   # ==========================================
   api:
     image: ${BACKEND_IMAGE:-zzephyra/lumisene-backend:latest}
-    pull_policy: always
+    pull_policy: never
     restart: unless-stopped
 
     environment:
@@ -85,6 +85,7 @@ services:
       SYSTEM_DEFAULTS_FILE: /config/system-defaults.json
       LOG_DIR: /var/log/fluxora
       LOG_SERVICE: api
+      MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
 
     env_file:
       - path: .env
@@ -100,6 +101,7 @@ services:
         condition: service_started
 
     volumes:
+      - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
       - ./config/system-defaults.json:/config/system-defaults.json:ro
       - ./logs:/var/log/fluxora
 
@@ -124,7 +126,7 @@ services:
   # ==========================================
   text-worker:
     image: ${BACKEND_IMAGE:-zzephyra/lumisene-backend:latest}
-    pull_policy: always
+    pull_policy: never
     restart: unless-stopped
 
     environment:
@@ -139,6 +141,7 @@ services:
       S3_SECRET_ACCESS_KEY: fluxora-local-secret
       LOG_DIR: /var/log/fluxora
       LOG_SERVICE: text-worker
+      MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
 
     env_file:
       - path: .env
@@ -149,6 +152,7 @@ services:
         condition: service_healthy
 
     volumes:
+      - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
       - ./logs:/var/log/fluxora
 
     command:
@@ -161,7 +165,7 @@ services:
   # ==========================================
   image-worker:
     image: ${BACKEND_IMAGE:-zzephyra/lumisene-backend:latest}
-    pull_policy: always
+    pull_policy: never
     restart: unless-stopped
 
     environment:
@@ -178,6 +182,7 @@ services:
       SYSTEM_DEFAULTS_FILE: /config/system-defaults.json
       LOG_DIR: /var/log/fluxora
       LOG_SERVICE: image-worker
+      MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
 
     env_file:
       - path: .env
@@ -192,6 +197,7 @@ services:
         condition: service_started
 
     volumes:
+      - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
       - ./config/system-defaults.json:/config/system-defaults.json:ro
       - ./logs:/var/log/fluxora
 
@@ -205,7 +211,7 @@ services:
   # ==========================================
   video-worker:
     image: ${BACKEND_IMAGE:-zzephyra/lumisene-backend:latest}
-    pull_policy: always
+    pull_policy: never
     restart: unless-stopped
 
     environment:
@@ -222,6 +228,7 @@ services:
       SYSTEM_DEFAULTS_FILE: /config/system-defaults.json
       LOG_DIR: /var/log/fluxora
       LOG_SERVICE: video-worker
+      MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
 
     env_file:
       - path: .env
@@ -236,6 +243,7 @@ services:
         condition: service_started
 
     volumes:
+      - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
       - ./config/system-defaults.json:/config/system-defaults.json:ro
       - ./logs:/var/log/fluxora
 
@@ -249,7 +257,7 @@ services:
   # ==========================================
   editor-worker:
     image: ${BACKEND_IMAGE:-zzephyra/lumisene-backend:latest}
-    pull_policy: always
+    pull_policy: never
     restart: unless-stopped
 
     environment:
@@ -264,6 +272,7 @@ services:
       S3_SECRET_ACCESS_KEY: fluxora-local-secret
       LOG_DIR: /var/log/fluxora
       LOG_SERVICE: editor-worker
+      MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
 
     env_file:
       - path: .env
@@ -276,6 +285,7 @@ services:
         condition: service_started
 
     volumes:
+      - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
       - ./logs:/var/log/fluxora
 
     command:
