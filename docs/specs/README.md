@@ -21,3 +21,5 @@
 Skill 运行时、后台关联和扩展方式见 [Skill System](skills.md)。
 
 - [扩图结构化重构与验收](outpainting-acceptance.md)
+
+- [剧情创作 V1](storyline.md)：章节、场景、结构化编辑与 AI 待确认草稿。

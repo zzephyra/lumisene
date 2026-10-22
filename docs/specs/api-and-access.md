@@ -74,6 +74,8 @@ GET /auth/csrf 发放短期预认证 CSRF token/cookie；登录和修改请求�
 | POST /uploads/token | filename,content_type,size,category(image/video/file)，可选 key；CSRF。不接受 user_id | 200 {token,key,domain,upload_url,expires_in}。key 由服务端生成。响应不含 Secret Key |
 | POST /uploads/complete | key；CSRF | 200 UploadFile。核对 key 属于当前用户，并在七牛确认对象存在且大小、MIME 符合登记后才标记 uploaded |
 | DELETE /uploads/{id} | CSRF | 204。按文件 ID 和当前用户删除七牛对象并标记 deleted。不能通过 key 删除任意对象 |
+| GET/POST P/stories | GET: limit、cursor，按更新时间倒序。POST: title(1–120)、description?、cover_upload_id? | {items,next_cursor} / 201 Story。封面必须是当前用户已上传的图片 |
+| GET/PATCH/DELETE P/stories/{id} | PATCH: title、description?、cover_upload_id?、expected_version。DELETE: expected_version | Story / Story / 204。跨项目 404，版本冲突 409 |
 | GET/POST P/documents | POST: title,asset_id；幂等键 | 列表 / 202 {document_id,version_id,ingestion_status,index_status} |
 | GET/DELETE P/documents/{id} | 无 | Document / 204 |
 | POST P/documents/{id}/versions | asset_id,expected_version；幂等键 | 202 文档版本状态 |

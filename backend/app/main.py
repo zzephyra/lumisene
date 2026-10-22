@@ -18,9 +18,20 @@ from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.infrastructure.db.session import create_db_engine, create_session_factory
 from app.modules.auth.router import router as auth_router
+from app.modules.characters.router import router as characters_router
 from app.modules.chat.router import router as chat_router
 from app.modules.editor.router import router as editor_router
+from app.modules.production import models as production_models  # noqa: F401
+from app.modules.production.router import (
+    router as production_router,
+)
+from app.modules.production.router import (
+    story_router as story_production_router,
+)
 from app.modules.projects.router import router as projects_router
+from app.modules.stories.router import router as stories_router
+from app.modules.story_assets.router import router as story_assets_router
+from app.modules.storyline.router import router as storyline_router
 from app.modules.uploads.router import router as uploads_router
 
 logger = get_logger(__name__)
@@ -60,7 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=resolved_settings.cors_allowed_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
         allow_headers=[
             "Content-Type",
             "X-CSRF-Token",
@@ -70,6 +81,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ],
     )
     register_exception_handlers(app)
+    app.include_router(production_router)
+    app.include_router(story_production_router)
     app.include_router(health_router)
     app.include_router(admin_operations_router)
     app.include_router(admin_media_router)
@@ -77,11 +90,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(system_settings_router)
     app.include_router(auth_router)
     app.include_router(projects_router)
+    app.include_router(stories_router)
+    app.include_router(storyline_router)
+    app.include_router(story_assets_router)
     app.include_router(model_configs_router)
     app.include_router(text_completions_router)
     app.include_router(generation_router)
     app.include_router(public_works_router)
     app.include_router(chat_router)
+    app.include_router(characters_router)
     app.include_router(editor_router)
     app.include_router(uploads_router)
     return app

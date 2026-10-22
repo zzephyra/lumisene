@@ -33,6 +33,9 @@ class MemorySession:
     async def flush(self) -> None:
         return None
 
+    async def scalar(self, _statement: object) -> int:
+        return 0
+
 
 class MemoryUnitOfWork(UnitOfWork):
     def __init__(self) -> None:

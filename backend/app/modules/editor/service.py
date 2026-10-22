@@ -89,7 +89,13 @@ class EditorService:
         )
 
     async def create(
-        self, uow: UnitOfWork, project_id: UUID, actor_id: UUID, payload: CreateDocument
+        self,
+        uow: UnitOfWork,
+        project_id: UUID,
+        actor_id: UUID,
+        payload: CreateDocument,
+        *,
+        commit: bool = True,
     ) -> EditorDocument:
         await self.authorize(uow, project_id, actor_id)
         await self.validate_assets(uow, project_id, payload.composition)
@@ -103,7 +109,8 @@ class EditorService:
         uow.session.add(row)
         await uow.session.flush()
         await self.replace_document_assets(uow, row)
-        await uow.commit()
+        if commit:
+            await uow.commit()
         return row
 
     async def save(
@@ -133,6 +140,8 @@ class EditorService:
         document_id: UUID,
         version: int,
         key: str,
+        *,
+        commit: bool = True,
     ) -> EditorRender:
         if not key.strip() or len(key) > 128:
             raise DomainError("Invalid idempotency key")
@@ -179,8 +188,11 @@ class EditorService:
                 uow.session.add(
                     EditorRenderAsset(project_id=project_id, render_id=task.id, asset_id=asset_id)
                 )
-            await uow.commit()
+            if commit:
+                await uow.commit()
         except IntegrityError:
+            if not commit:
+                raise
             await uow.rollback()
             existing = (await uow.session.execute(stmt)).scalar_one()
             if existing.request_hash != fingerprint:

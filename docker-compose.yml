@@ -1,8 +1,9 @@
-
+# Lumisene local development environment
+# Builds backend from local ./backend source (no GHCR dependency).
+# Run: docker compose up -d --build
+# Worker changes: docker compose restart <worker-name>
+# Requires a backend Dockerfile that installs runtime dependencies and places the app in /app.
 services:
-  # ==========================================
-  # PostgreSQL
-  # ==========================================
   postgres:
     image: postgres:16
     restart: unless-stopped
@@ -11,70 +12,50 @@ services:
       POSTGRES_PASSWORD: fluxora
       POSTGRES_DB: fluxora
     ports:
-      - "127.0.0.1:5432:5432"
+    - 127.0.0.1:5432:5432
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+    - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test:
-        - CMD-SHELL
-        - pg_isready -U fluxora -d fluxora
+      - CMD-SHELL
+      - pg_isready -U fluxora -d fluxora
       interval: 5s
       timeout: 5s
       retries: 10
-
-  # ==========================================
-  # Redis
-  # ==========================================
   redis:
     image: redis:7
     restart: unless-stopped
     ports:
-      - "127.0.0.1:6379:6379"
-
-  # ==========================================
-  # Elasticsearch
-  # ==========================================
+    - 127.0.0.1:6379:6379
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
     restart: unless-stopped
     environment:
       discovery.type: single-node
-      xpack.security.enabled: "false"
-      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      xpack.security.enabled: 'false'
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
     ports:
-      - "127.0.0.1:9200:9200"
+    - 127.0.0.1:9200:9200
     volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-
-  # ==========================================
-  # MinIO
-  # ==========================================
+    - elasticsearch_data:/usr/share/elasticsearch/data
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    image: ghcr.io/coollabsio/minio:latest
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: fluxora
       MINIO_ROOT_PASSWORD: fluxora-local-secret
     ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+    - 127.0.0.1:9000:9000
+    - 127.0.0.1:9001:9001
     volumes:
-      - minio_data:/data
-
-  # ==========================================
-  # FastAPI
-  # GitHub Actions builds the image
-  # ==========================================
+    - minio_data:/data
   api:
-    image: ${BACKEND_IMAGE:-zzephyra/lumisene-backend:latest}
-    pull_policy: never
     restart: unless-stopped
-
     environment:
       ENVIRONMENT: development
       DATABASE_URL: postgresql+asyncpg://fluxora:fluxora@postgres:5432/fluxora
-      DATABASE_CONNECT_TIMEOUT_SECONDS: "5"
+      DATABASE_CONNECT_TIMEOUT_SECONDS: '5'
       MODEL_SECRET_REFS: qianwen,local_model_secret,wan_video
       S3_ENDPOINT_URL: http://minio:9000
       S3_BUCKET: fluxora
@@ -86,53 +67,46 @@ services:
       LOG_DIR: /var/log/fluxora
       LOG_SERVICE: api
       MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
-
     env_file:
-      - path: .env
-        required: false
-
+    - path: .env
+      required: false
     ports:
-      - "8000:8000"
-
+    - 8000:8000
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
-
     volumes:
-      - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
-      - ./config/system-defaults.json:/config/system-defaults.json:ro
-      - ./logs:/var/log/fluxora
-
+    - ./backend:/app
+    - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
+    - ./config/system-defaults.json:/config/system-defaults.json:ro
+    - ./logs:/var/log/fluxora
     command:
-      - sh
-      - -c
-      - alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
-
+    - sh
+    - -c
+    - alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
     healthcheck:
       test:
-        - CMD
-        - python
-        - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')
       interval: 5s
       timeout: 5s
       retries: 20
       start_period: 30s
-
-  # ==========================================
-  # Text Worker
-  # ==========================================
+    image: lumisene-backend:dev
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    pull_policy: build
   text-worker:
-    image: ${BACKEND_IMAGE:-zzephyra/lumisene-backend:latest}
-    pull_policy: never
     restart: unless-stopped
-
     environment:
       ENVIRONMENT: development
       DATABASE_URL: postgresql+asyncpg://fluxora:fluxora@postgres:5432/fluxora
-      DATABASE_CONNECT_TIMEOUT_SECONDS: "5"
+      DATABASE_CONNECT_TIMEOUT_SECONDS: '5'
       MODEL_SECRET_REFS: qianwen,local_model_secret,wan_video
       S3_ENDPOINT_URL: http://minio:9000
       S3_BUCKET: fluxora
@@ -142,36 +116,31 @@ services:
       LOG_DIR: /var/log/fluxora
       LOG_SERVICE: text-worker
       MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
-
     env_file:
-      - path: .env
-        required: false
-
+    - path: .env
+      required: false
     depends_on:
       api:
         condition: service_healthy
-
     volumes:
-      - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
-      - ./logs:/var/log/fluxora
-
+    - ./backend:/app
+    - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
+    - ./logs:/var/log/fluxora
     command:
-      - python
-      - -m
-      - app.workers.text_completion
-
-  # ==========================================
-  # Image Worker
-  # ==========================================
+    - python
+    - -m
+    - app.workers.text_completion
+    image: lumisene-backend:dev
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    pull_policy: build
   image-worker:
-    image: ${BACKEND_IMAGE:-zzephyra/lumisene-backend:latest}
-    pull_policy: never
     restart: unless-stopped
-
     environment:
       ENVIRONMENT: development
       DATABASE_URL: postgresql+asyncpg://fluxora:fluxora@postgres:5432/fluxora
-      DATABASE_CONNECT_TIMEOUT_SECONDS: "5"
+      DATABASE_CONNECT_TIMEOUT_SECONDS: '5'
       MODEL_SECRET_REFS: qianwen,local_model_secret,wan_video
       S3_ENDPOINT_URL: http://minio:9000
       S3_BUCKET: fluxora
@@ -183,11 +152,9 @@ services:
       LOG_DIR: /var/log/fluxora
       LOG_SERVICE: image-worker
       MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
-
     env_file:
-      - path: .env
-        required: false
-
+    - path: .env
+      required: false
     depends_on:
       api:
         condition: service_healthy
@@ -195,29 +162,26 @@ services:
         condition: service_started
       redis:
         condition: service_started
-
     volumes:
-      - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
-      - ./config/system-defaults.json:/config/system-defaults.json:ro
-      - ./logs:/var/log/fluxora
-
+    - ./backend:/app
+    - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
+    - ./config/system-defaults.json:/config/system-defaults.json:ro
+    - ./logs:/var/log/fluxora
     command:
-      - python
-      - -m
-      - app.workers.image_generation
-
-  # ==========================================
-  # Video Worker
-  # ==========================================
+    - python
+    - -m
+    - app.workers.image_generation
+    image: lumisene-backend:dev
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    pull_policy: build
   video-worker:
-    image: ${BACKEND_IMAGE:-zzephyra/lumisene-backend:latest}
-    pull_policy: never
     restart: unless-stopped
-
     environment:
       ENVIRONMENT: development
       DATABASE_URL: postgresql+asyncpg://fluxora:fluxora@postgres:5432/fluxora
-      DATABASE_CONNECT_TIMEOUT_SECONDS: "5"
+      DATABASE_CONNECT_TIMEOUT_SECONDS: '5'
       MODEL_SECRET_REFS: qianwen,local_model_secret,wan_video
       S3_ENDPOINT_URL: http://minio:9000
       S3_BUCKET: fluxora
@@ -229,11 +193,9 @@ services:
       LOG_DIR: /var/log/fluxora
       LOG_SERVICE: video-worker
       MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
-
     env_file:
-      - path: .env
-        required: false
-
+    - path: .env
+      required: false
     depends_on:
       api:
         condition: service_healthy
@@ -241,29 +203,26 @@ services:
         condition: service_started
       redis:
         condition: service_started
-
     volumes:
-      - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
-      - ./config/system-defaults.json:/config/system-defaults.json:ro
-      - ./logs:/var/log/fluxora
-
+    - ./backend:/app
+    - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
+    - ./config/system-defaults.json:/config/system-defaults.json:ro
+    - ./logs:/var/log/fluxora
     command:
-      - python
-      - -m
-      - app.workers.video_generation
-
-  # ==========================================
-  # Editor Worker
-  # ==========================================
+    - python
+    - -m
+    - app.workers.video_generation
+    image: lumisene-backend:dev
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    pull_policy: build
   editor-worker:
-    image: ${BACKEND_IMAGE:-zzephyra/lumisene-backend:latest}
-    pull_policy: never
     restart: unless-stopped
-
     environment:
       ENVIRONMENT: development
       DATABASE_URL: postgresql+asyncpg://fluxora:fluxora@postgres:5432/fluxora
-      DATABASE_CONNECT_TIMEOUT_SECONDS: "5"
+      DATABASE_CONNECT_TIMEOUT_SECONDS: '5'
       MODEL_SECRET_REFS: qianwen,local_model_secret,wan_video
       S3_ENDPOINT_URL: http://minio:9000
       S3_BUCKET: fluxora
@@ -273,57 +232,46 @@ services:
       LOG_DIR: /var/log/fluxora
       LOG_SERVICE: editor-worker
       MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
-
     env_file:
-      - path: .env
-        required: false
-
+    - path: .env
+      required: false
     depends_on:
       api:
         condition: service_healthy
       minio:
         condition: service_started
-
     volumes:
-      - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
-      - ./logs:/var/log/fluxora
-
+    - ./backend:/app
+    - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
+    - ./logs:/var/log/fluxora
     command:
-      - python
-      - -m
-      - app.workers.editor_render
-
-  # ==========================================
-  # Frontend
-  # Temporarily built on the server
-  # ==========================================
+    - python
+    - -m
+    - app.workers.editor_render
+    image: lumisene-backend:dev
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    pull_policy: build
   frontend:
     build:
       context: ./frontend
       target: development
-
     pull_policy: build
     restart: unless-stopped
-
     environment:
       VITE_API_PROXY_TARGET: http://api:8000
-
     ports:
-      - "5173:5173"
-
+    - 5173:5173
     depends_on:
       api:
         condition: service_healthy
-
     volumes:
-      - ./frontend:/app
-      - frontend_node_modules:/app/node_modules
-
-# ==========================================
-# Persistent Volumes
-# ==========================================
+    - ./frontend:/app
+    - frontend_node_modules:/app/node_modules
 volumes:
-  elasticsearch_data:
-  minio_data:
-  postgres_data:
-  frontend_node_modules:
+  elasticsearch_data: null
+  minio_data: null
+  postgres_data: null
+  frontend_node_modules: null
+name: lumisene

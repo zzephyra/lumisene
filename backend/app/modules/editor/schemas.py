@@ -42,6 +42,7 @@ class Composition(StrictModel):
     width: int = Field(ge=240, le=1920, multiple_of=2)
     height: int = Field(ge=240, le=1920, multiple_of=2)
     duration_in_frames: int = Field(ge=1, le=18000)
+    frame: Literal["fit", "fill"] = "fit"
     tracks: list[VideoTrack] = Field(min_length=1, max_length=1)
 
     @model_validator(mode="after")

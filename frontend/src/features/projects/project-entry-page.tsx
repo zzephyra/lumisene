@@ -5,7 +5,6 @@ import { Navigate, useNavigate, useParams } from "react-router";
 
 import { Button } from "../../components/ui/button";
 import { isApiError, userFacingMessage } from "../../lib/api";
-import { AppHeader } from "../auth";
 import { getProject, projectDetailQueryKey } from "./api";
 import { isProjectId } from "./types";
 import { Workspace } from "./workspace/workspace";
@@ -41,7 +40,6 @@ export function ProjectEntryPage() {
 
   return (
     <div className="studio">
-      <AppHeader />
       <main className="mx-auto flex w-full max-w-[760px] flex-col gap-6 px-[6%] py-16 md:px-[5%]">
         {project.isPending ? (
           <p className="flex items-center gap-2 text-muted" role="status">

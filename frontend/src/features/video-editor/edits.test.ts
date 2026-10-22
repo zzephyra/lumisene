@@ -7,6 +7,7 @@ import { isTextInput } from "./shortcuts";
 const composition: Composition = {
   schema_version: 1,
   fps: 30,
+  frame: "fit",
   width: 1920,
   height: 1080,
   duration_in_frames: 300,

@@ -1,9 +1,12 @@
 """Queue one explicit text-to-video generation and finish it outside the request."""
 
+import asyncio
 import hashlib
 import json
 import re
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Protocol
 from uuid import UUID, uuid4
 
@@ -17,16 +20,24 @@ from app.core.errors import (
     CancellationUnsupportedError,
     ConflictError,
     NotFoundError,
+    ProviderTaskFailedError,
     ValidationError,
 )
 from app.core.errors import TimeoutError as ProviderTimeout
 from app.core.logging import get_logger
 from app.infrastructure.ai.adapters.dashscope_video import DashScopeVideo
-from app.infrastructure.ai.catalog import video_reference_resolutions, require_assigned, require_editor_model
+from app.infrastructure.ai.catalog import (
+    require_assigned,
+    require_editor_model,
+)
 from app.infrastructure.ai.domain import json_object
 from app.infrastructure.ai.models import ModelConfig
+from app.infrastructure.ai.video_parameters import validate_video_parameters
 from app.infrastructure.db.session import UnitOfWork
+from app.infrastructure.media.render import probe
 from app.infrastructure.storage.objects import build_object_storage
+from app.modules.generation.inputs import require_input
+from app.modules.generation.models import GenerationTask
 from app.modules.generation.persistence import (
     describe_outputs,
     put_if_changed,
@@ -34,8 +45,6 @@ from app.modules.generation.persistence import (
     remember_objects,
     storage_identity,
 )
-from app.modules.generation.inputs import require_input
-from app.modules.generation.models import GenerationTask
 
 logger = get_logger(__name__)
 _IDEMPOTENCY_KEY = re.compile(r"^[\x21-\x7e]{1,128}$")
@@ -100,29 +109,21 @@ class VideoGenerationService:
         parameters: dict,
         idempotency_key: str,
         input_id: UUID | None = None,
+        commit: bool = True,
     ) -> GenerationTask:
         key = _clean_key(idempotency_key)
         cleaned = _clean_prompt(prompt)
-        safe_parameters = _parameters(parameters) if input_id is None else parameters
         if not self.settings.object_storage_configured:
             raise ValidationError("Object storage is not configured")
         source = None
         if input_id:
             config = await require_editor_model(uow, self.settings, "image_to_video")
             source = await require_input(uow.session, project_id, input_id, inpaint=False)
-            if (
-                set(parameters) - {"resolution", "duration"}
-                or parameters.get("duration", 5) != 5
-                or type(parameters.get("duration", 5)) is not int
-            ):
-                raise ValidationError("图生视频当前仅支持 5 秒")
-            resolutions = video_reference_resolutions(config, self.settings)
-            resolution = parameters.get("resolution", resolutions[0])
-            if resolution not in resolutions:
-                raise ValidationError("该模型不支持所选清晰度")
-            safe_parameters = {"duration": 5, "resolution": resolution}
         else:
             config = await require_assigned(uow.session, "text_to_video")
+        safe_parameters = validate_video_parameters(
+            config, self.settings, parameters, reference=bool(source)
+        )
         if self.settings.model_endpoint(config.secret_ref) is None:
             raise ValidationError("Secret reference is not configured")
         hash_parameters = (
@@ -163,8 +164,11 @@ class VideoGenerationService:
         uow.session.add(row)
         try:
             await uow.session.flush()
-            await uow.commit()
+            if commit:
+                await uow.commit()
         except IntegrityError:
+            if not commit:
+                raise
             await uow.rollback()
             raced = await _by_key(uow.session, project_id, actor_id, key)
             if raced is None:
@@ -341,6 +345,9 @@ class VideoGenerationService:
             return
         try:
             state, video = await self._call_poll(model_config_id, provider_task_id)
+        except ProviderTaskFailedError as exc:
+            await self._fail(task_id, exc.code, exc.message)
+            return
         except ProviderTimeout:
             await self._schedule(task_id, started_at)
             return
@@ -461,7 +468,7 @@ class VideoGenerationService:
                 model=model_name,
                 prompt=prompt,
                 size=None,
-                duration=5,
+                duration=parameters["duration"],
                 image=image,
                 resolution=parameters["resolution"],
             )
@@ -541,6 +548,15 @@ class VideoGenerationService:
     ) -> None:
         del actor_id
         items = describe_outputs(project_id, task_id, [video])
+        try:
+            with TemporaryDirectory(prefix="lumi-probe-") as directory:
+                path = Path(directory) / "source.mp4"
+                await asyncio.to_thread(path.write_bytes, video[0])
+                metadata = await probe(path)
+                items[0].update({k: metadata[k] for k in ("duration_ms", "width", "height")})
+        except (ValueError, OSError, TimeoutError):
+            # Preserve the raw result; never invent timing for an unprobeable source.
+            logger.warning("video_metadata_unavailable", task_id=str(task_id))
         await put_if_changed(
             self.storage,
             object_key=items[0]["object_key"],
@@ -552,9 +568,7 @@ class VideoGenerationService:
         async with factory() as session:
             await remember_objects(session, task_id, items)
         async with factory() as session:
-            await register_stored_assets(
-                session, task_id, storage_provider=provider, bucket=bucket
-            )
+            await register_stored_assets(session, task_id, storage_provider=provider, bucket=bucket)
         logger.info("video_generation_succeeded", task_id=str(task_id))
 
     async def finish_persisted(self, task_id: UUID) -> bool:

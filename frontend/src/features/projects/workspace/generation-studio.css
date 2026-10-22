@@ -5,7 +5,7 @@
   grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) 88px;
   gap: 0 24px;
-  height: calc(100svh - 56px);
+  height: 100svh;
   padding: 24px;
   max-width: none;
   background: var(--color-canvas);
@@ -73,7 +73,7 @@
 @media(min-width:1600px) { .workspace .generation-page { grid-template-columns: minmax(360px,440px) minmax(0,1fr); gap: 0 32px; padding: 24px 32px; } }
 @media(max-width:1024px) and (min-width:768px) { .workspace .generation-page { grid-template-columns: 320px minmax(0,1fr); gap: 0 16px; padding: 16px; } .studio-prompt-panel { padding: 12px; } }
 @media(max-width:767px) {
-  .workspace .generation-page { display: flex; flex-direction: column; height: auto; min-height: calc(100svh - 68px); overflow: visible; padding: 16px; gap: 0; }
+  .workspace .generation-page { display: flex; flex-direction: column; height: auto; min-height: 100svh; overflow: visible; padding: 16px; gap: 0; }
   .workspace .generation-page .generation-layout { display: flex; flex-direction: column; gap: 0; }
   .workspace .generation-page .generation-settings { height: auto; overflow: visible; margin-bottom: 20px; }
   .studio-prompt-panel { flex: none; min-height: 320px; }

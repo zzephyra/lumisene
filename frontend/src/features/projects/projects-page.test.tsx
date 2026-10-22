@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +7,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api";
 import { getMe } from "../auth/api";
 import { RequireSession } from "../auth";
-import { createProject, ensurePersonalSpace, getProject, listProjects } from "./api";
+import {
+  createProject,
+  ensurePersonalSpace,
+  getProject,
+  listProjects,
+} from "./api";
 import { ProjectEntryPage } from "./project-entry-page";
 import { ProjectsPage } from "./projects-page";
 import { StudioEntry } from "./studio-entry";
@@ -26,7 +31,11 @@ vi.mock("./api", () => ({
   ensurePersonalSpace: vi.fn(),
   projectListQueryKey: ["projects", "list"],
   personalSpaceQueryKey: ["projects", "personal"],
-  projectDetailQueryKey: (projectId: string) => ["projects", projectId, "detail"],
+  projectDetailQueryKey: (projectId: string) => [
+    "projects",
+    projectId,
+    "detail",
+  ],
 }));
 
 const projectId = "11111111-1111-4111-8111-111111111111";
@@ -72,8 +81,10 @@ function renderAt(path: string) {
 
 describe("ProjectsPage", () => {
   beforeEach(() => {
+    localStorage.removeItem("lumi.sidebar.collapsed");
     vi.mocked(getMe).mockReset();
     vi.mocked(listProjects).mockReset();
+    vi.mocked(listProjects).mockResolvedValue({ items: [], next_cursor: null });
     vi.mocked(getProject).mockReset();
     vi.mocked(createProject).mockReset();
     vi.mocked(ensurePersonalSpace).mockReset();
@@ -88,8 +99,12 @@ describe("ProjectsPage", () => {
     vi.mocked(listProjects).mockResolvedValue({ items: [], next_cursor: null });
     renderAt("/projects");
 
-    expect(await screen.findByRole("heading", { name: "还没有创作空间" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "创作空间" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "还没有创作空间" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "创作空间" }),
+    ).toBeInTheDocument();
   });
 
   it("shows a project returned by the API", async () => {
@@ -109,10 +124,9 @@ describe("ProjectsPage", () => {
     });
     renderAt("/projects");
 
-    expect(await screen.findByRole("link", { name: /春季成片/ })).toHaveAttribute(
-      "href",
-      `/projects/${projectId}`,
-    );
+    expect(
+      await screen.findByRole("link", { name: /春季成片/ }),
+    ).toHaveAttribute("href", `/projects/${projectId}`);
     expect(screen.getByText("所有者")).toBeInTheDocument();
   });
 
@@ -158,12 +172,17 @@ describe("ProjectsPage", () => {
     const user = userEvent.setup();
     renderAt("/projects");
 
-    await user.click((await screen.findAllByRole("button", { name: "新建创作空间" }))[0]);
+    await user.click(
+      (await screen.findAllByRole("button", { name: "新建创作空间" }))[0],
+    );
     expect(screen.getByText(/不会从其他创作空间带过来/)).toBeInTheDocument();
     await user.type(screen.getByLabelText("创作空间名称"), "新世界");
     await user.click(screen.getByRole("button", { name: "创建" }));
 
-    expect(await screen.findByRole("button", { name: "创作空间" })).toHaveTextContent("新世界");
+    expect(await screen.findByRole("link", { name: "创作" })).toHaveAttribute(
+      "href",
+      "/projects/22222222-2222-4222-8222-222222222222",
+    );
     expect(screen.getByText(/这个创作空间和其他空间分开/)).toBeInTheDocument();
     expect(screen.queryByText("春季成片")).not.toBeInTheDocument();
     expect(createProject).toHaveBeenCalledTimes(1);
@@ -185,9 +204,13 @@ describe("ProjectsPage", () => {
     const user = userEvent.setup();
     renderAt("/projects");
 
-    expect(await screen.findByRole("heading", { name: "无法加载创作空间" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "无法加载创作空间" }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "重试" }));
-    expect(await screen.findByRole("heading", { name: "还没有创作空间" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "还没有创作空间" }),
+    ).toBeInTheDocument();
   });
 
   it("opens the personal space when a project link does not exist", async () => {
@@ -223,8 +246,12 @@ describe("ProjectsPage", () => {
     });
     renderAt(`/projects/${projectId}`);
 
-    expect(await screen.findByRole("heading", { name: "和 Lumi 一起开始创作" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "创作空间" })).toHaveTextContent("个人空间");
+    expect(
+      await screen.findByRole("heading", { name: "和 Lumi 一起开始创作" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "创作空间" }),
+    ).not.toBeInTheDocument();
   });
 
   it("retries when the personal space cannot be opened", async () => {
@@ -260,9 +287,13 @@ describe("ProjectsPage", () => {
     const user = userEvent.setup();
     renderAt("/studio");
 
-    expect(await screen.findByRole("heading", { name: "无法打开个人空间" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "无法打开个人空间" }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "重试" }));
-    expect(await screen.findByRole("heading", { name: "和 Lumi 一起开始创作" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "和 Lumi 一起开始创作" }),
+    ).toBeInTheDocument();
     expect(ensurePersonalSpace).toHaveBeenCalledTimes(2);
   });
 
@@ -278,11 +309,78 @@ describe("ProjectsPage", () => {
     });
     renderAt(`/projects/${projectId}`);
 
-    expect(await screen.findByRole("heading", { name: "和 Lumi 一起开始创作" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "创作需求" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "和 Lumi 一起开始创作" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "创作需求" }),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/当前文本模型/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "发送给模型" })).not.toBeInTheDocument();
-    expect(screen.getByText("成员")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "发送给模型" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "账户菜单" }),
+    ).toBeInTheDocument();
+    expect(document.querySelector(".workspace-header")).toBeNull();
     expect(screen.queryByText("演示")).not.toBeInTheDocument();
+  });
+  it("switches spaces from the account menu and keeps the current space on failure", async () => {
+    const otherId = "22222222-2222-4222-8222-222222222222";
+    const current = {
+      id: projectId,
+      name: "当前空间",
+      role: "OWNER" as const,
+      kind: "standard" as const,
+      version: 1,
+      created_at: "2026-09-27T04:00:00Z",
+      updated_at: "2026-09-27T04:00:00Z",
+    };
+    const other = { ...current, id: otherId, name: "其他空间" };
+    vi.mocked(getProject).mockImplementation(async (id) => {
+      if (id === otherId) throw new Error("denied");
+      return current;
+    });
+    vi.mocked(listProjects).mockResolvedValue({
+      items: [current, other],
+      next_cursor: null,
+    });
+    const user = userEvent.setup();
+    renderAt(`/projects/${projectId}`);
+    await user.click(await screen.findByRole("button", { name: "账户菜单" }));
+    await user.click(screen.getByRole("menuitem", { name: "切换空间" }));
+    await user.click(await screen.findByRole("menuitem", { name: "其他空间" }));
+    expect(await screen.findByText("切换空间失败，请重试")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "创作" })).toHaveAttribute(
+      "href",
+      `/projects/${projectId}`,
+    );
+    vi.mocked(getProject).mockImplementation(async (id) =>
+      id === otherId ? other : current,
+    );
+    await user.click(screen.getByRole("button", { name: "账户菜单" }));
+    await user.click(screen.getByRole("menuitem", { name: "切换空间" }));
+    await user.click(screen.getByRole("menuitem", { name: "其他空间" }));
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "创作" })).toHaveAttribute(
+        "href",
+        `/projects/${otherId}`,
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "收起侧边栏" }));
+    expect(localStorage.getItem("lumi.sidebar.collapsed")).toBe("true");
+    expect(screen.getByRole("button", { name: "展开侧边栏" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    cleanup();
+    renderAt(`/projects/${otherId}`);
+    expect(
+      await screen.findByRole("button", { name: "展开侧边栏" }),
+    ).toHaveAttribute("aria-expanded", "false");
+
+    expect(
+      screen.getByRole("button", { name: "账户菜单" }),
+    ).toBeInTheDocument();
   });
 });

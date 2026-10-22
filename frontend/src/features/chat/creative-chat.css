@@ -51,7 +51,7 @@
 .creative-chat.is-active .composer-bottom { margin-top: 8px; }
 .creative-chat.is-active .chat-error { flex-shrink: 0; margin: 6px 0; font-size: 13px; }
 @media(max-width:767px) {
-  .workspace-create.chat-active { height: calc(100dvh - 68px); }
+  .workspace-create.chat-active { height: 100dvh; }
   .workspace-create.chat-active .creative-center { width: calc(100% - 24px); padding-top: 8px; }
   .creative-chat.is-active .chat-messages { padding-inline: 2px; }
   .creative-chat.is-active .workspace-composer { padding: 12px; }

@@ -7,9 +7,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError
+from app.modules.characters.image_references import character_image_references
 from app.modules.editor.models import EditorDocumentAsset, EditorRender, EditorRenderAsset
 from app.modules.generation.models import Asset, AssetPurgeJob
+from app.modules.production.references import production_asset_references
 from app.modules.settings.service import SettingsService
+from app.modules.story_assets.references import story_asset_references
 
 
 def deletion_plan(*, policy: str, editor_refs: int, other_ready: int) -> str:
@@ -48,8 +51,18 @@ class AssetDeletionService:
         if asset is None:
             raise NotFoundError("Asset was not found")
         if asset.status == "deleted":
-            job = await session.scalar(select(AssetPurgeJob).where(AssetPurgeJob.asset_id == asset.id))
-            return _result(asset, job.policy if job else "retain_cloud_file", job.status if job else None)
+            job = await session.scalar(
+                select(AssetPurgeJob).where(AssetPurgeJob.asset_id == asset.id)
+            )
+            return _result(
+                asset, job.policy if job else "retain_cloud_file", job.status if job else None
+            )
+        if await character_image_references(session, project_id, asset.id):
+            raise ConflictError("作品仍被人物形象引用，请先移除人物图片")
+        if await story_asset_references(session, asset_id=asset.id):
+            raise ConflictError("作品仍被剧本资源库引用，请先移除引用")
+        if await production_asset_references(session, project_id, asset.id):
+            raise ConflictError("作品仍被视频制作工作台引用，请先移除生成版本或镜头引用")
         editor_refs = await _editor_refs(session, project_id, asset.id)
         other_ready = await session.scalar(
             select(func.count())
@@ -62,7 +75,9 @@ class AssetDeletionService:
             )
         )
         policy, revision = await self._settings.deletion_policy(session)
-        plan = deletion_plan(policy=policy, editor_refs=editor_refs, other_ready=int(other_ready or 0))
+        plan = deletion_plan(
+            policy=policy, editor_refs=editor_refs, other_ready=int(other_ready or 0)
+        )
         if plan == "blocked":
             raise ConflictError("作品仍被编辑器或导出任务使用，不能删除")
         now = datetime.now(UTC)
@@ -125,13 +140,19 @@ async def process_purge_jobs(session_factory, settings) -> None:
     s3 = S3Storage(settings) if settings.s3_endpoint_url.strip() else None
     async with session_factory() as session:
         jobs = (
-            await session.execute(
-                select(AssetPurgeJob)
-                .where(AssetPurgeJob.status.in_(("pending", "failed")), AssetPurgeJob.attempts < 8)
-                .limit(5)
-                .with_for_update(skip_locked=True)
+            (
+                await session.execute(
+                    select(AssetPurgeJob)
+                    .where(
+                        AssetPurgeJob.status.in_(("pending", "failed")), AssetPurgeJob.attempts < 8
+                    )
+                    .limit(5)
+                    .with_for_update(skip_locked=True)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for job in jobs:
             others = await session.scalar(
                 select(func.count())

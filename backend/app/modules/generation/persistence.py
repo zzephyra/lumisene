@@ -53,7 +53,9 @@ async def put_if_changed(storage, *, object_key: str, content: bytes, content_ty
     last_error: Exception | None = None
     for _ in range(3):
         try:
-            await storage.put_object(object_key=object_key, content=content, content_type=content_type)
+            await storage.put_object(
+                object_key=object_key, content=content, content_type=content_type
+            )
             return
         except Exception as exc:
             last_error = exc
@@ -85,12 +87,18 @@ async def register_stored_assets(
         return False
     if task.status == "succeeded":
         return True
-    items = task.request_snapshot.get("stored_objects") if isinstance(task.request_snapshot, dict) else None
+    items = (
+        task.request_snapshot.get("stored_objects")
+        if isinstance(task.request_snapshot, dict)
+        else None
+    )
     if not isinstance(items, list) or not items:
         return False
     existing = (
-        await session.execute(select(GenerationOutput).where(GenerationOutput.task_id == task_id))
-    ).scalars().all()
+        (await session.execute(select(GenerationOutput).where(GenerationOutput.task_id == task_id)))
+        .scalars()
+        .all()
+    )
     if existing:
         _succeed(task)
         await session.commit()
@@ -108,8 +116,9 @@ async def register_stored_assets(
                 sha256=item["sha256"],
                 mime=item["mime"],
                 size_bytes=item["size_bytes"],
-                width=None,
-                height=None,
+                width=item.get("width"),
+                height=item.get("height"),
+                duration_ms=item.get("duration_ms"),
                 status="ready",
                 created_by=task.actor_id,
                 storage_provider=storage_provider,

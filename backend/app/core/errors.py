@@ -79,6 +79,12 @@ class ProviderError(ExternalServiceError):
     code = "provider_error"
 
 
+class ProviderTaskFailedError(ProviderError):
+    """Provider explicitly reports a terminal failure, not a poll transport error."""
+
+    code = "provider_failed"
+
+
 class TimeoutError(ExternalServiceError):
     """Provider or external call exceeded its deadline. Not the builtin timeout."""
 

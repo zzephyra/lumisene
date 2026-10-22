@@ -7,13 +7,14 @@ Submit timeouts stay unknown: the caller must not send the request again.
 import asyncio
 import base64
 import json
+import re
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit
 
-from app.core.errors import ProviderError, RateLimitError
+from app.core.errors import ProviderError, ProviderTaskFailedError, RateLimitError
 from app.core.errors import TimeoutError as ProviderTimeout
 from app.infrastructure.ai.domain import VIDEO_BYTES_MAX, WAN3_MEDIA_VIDEO_MODELS
 
@@ -54,7 +55,15 @@ class DashScopeVideo:
         parameters: dict[str, Any] = {"duration": duration}
         if size:
             parameters["size"] = size
-        payload = {"model": model, "input": {"prompt": prompt}, "parameters": parameters}
+        # China Model Studio uses the wanx2.1 identifier for this same legacy model.
+        # Keep catalog identities stable; never switch providers or model families on failure.
+        wire_model = model
+        if (urlsplit(base_url).hostname or "").endswith(".maas.aliyuncs.com"):
+            wire_model = {
+                "wan2.1-i2v-turbo": "wanx2.1-i2v-turbo",
+                "wan2.1-i2v-plus": "wanx2.1-i2v-plus",
+            }.get(model, model)
+        payload = {"model": wire_model, "input": {"prompt": prompt}, "parameters": parameters}
         if image is not None:
             reference = _image_data_uri(image)
             if model in WAN3_MEDIA_VIDEO_MODELS:
@@ -74,7 +83,13 @@ class DashScopeVideo:
         task_id = output.get("task_id")
         task_status = output.get("task_status")
         if status < 200 or status >= 300 or task_status == "FAILED":
-            raise ProviderError("The model provider rejected the video request")
+            code = body.get("code", output.get("code", "")) if isinstance(body, dict) else ""
+            safe_code = (
+                code
+                if isinstance(code, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,79}", code)
+                else "unknown"
+            )
+            raise ProviderError(f"视频供应商拒绝请求（HTTP {status}，{safe_code}）")
         if not isinstance(task_id, str) or not task_id.strip():
             raise ProviderTimeout("The model provider submission outcome is unknown")
         return task_id.strip()
@@ -100,7 +115,19 @@ class DashScopeVideo:
                 raise ProviderError("The model provider returned an empty response")
             return "succeeded", await self._download(remote.strip())
         if task_status in {"FAILED", "CANCELED"}:
-            return "failed", None
+            raw_code = output.get("code") or (body.get("code") if isinstance(body, dict) else None)
+            code = (
+                raw_code
+                if isinstance(raw_code, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", raw_code)
+                else "Unknown"
+            )
+            reason = (
+                "供应商视频生成算法异常，可重试失败镜头"
+                if code == "AlgoError"
+                else "供应商未能完成视频生成，请检查输入或稍后重试"
+            )
+            # Never expose raw provider messages: they may include stack traces or URLs.
+            raise ProviderTaskFailedError(f"{reason}（{code}）")
         return "pending", None
 
     async def _request(

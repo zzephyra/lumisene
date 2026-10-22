@@ -43,3 +43,28 @@ class UploadRepository:
             .limit(limit)
         )
         return list((await session.execute(stmt)).scalars().all())
+
+    async def lock_uploaded(
+        self,
+        session: AsyncSession,
+        upload_id: UUID,
+        user_id: UUID | None = None,
+    ) -> UploadFile | None:
+        stmt = select(UploadFile).where(
+            UploadFile.id == upload_id,
+            UploadFile.status == "uploaded",
+        )
+        if user_id is not None:
+            stmt = stmt.where(UploadFile.user_id == user_id)
+        return (await session.execute(stmt.with_for_update())).scalar_one_or_none()
+
+    async def uploaded_by_ids(
+        self, session: AsyncSession, upload_ids: set[UUID]
+    ) -> list[UploadFile]:
+        if not upload_ids:
+            return []
+        stmt = select(UploadFile).where(
+            UploadFile.id.in_(upload_ids),
+            UploadFile.status == "uploaded",
+        )
+        return list((await session.execute(stmt)).scalars().all())

@@ -51,3 +51,18 @@
 - [038 — 公开作品与个人主页](038-public-works.md)
 
 - [039 — LangChain 创意对话](039-langchain-creative-chat.md)
+
+| [042](042-project-stories.md) | 项目剧本列表与封面引用 | Accepted |
+| [043](043-story-scoped-character-graph.md) | 人物图谱属于剧本 | Accepted |
+| [044](044-character-photos.md) | 人物照片复用上传服务 | Accepted |
+| [045](045-character-image-library.md) | 人物多图与生成任务关联 | Accepted |
+
+- [046 剧情章节与场景创作](046-storyline-authoring.md)
+- [047 剧本资源库](047-story-asset-library.md)
+- [048 剧本视频工作台](048-script-video-workbench.md)
+- [049 剧本视频制作 V2](049-production-v2.md)
+- [050 故事工作区与六步视频生成流程](050-story-video-flow.md)
+
+- [051 视频制作工作流简化与费用保护](051-production-workflow-ux.md)
+
+- [ADR-052：暂缓视频制作计费功能](052-defer-production-billing.md)

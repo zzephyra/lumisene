@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { thumbnail } from "./media";
 import type { ClipData } from "./api";
 import { mediaUrl } from "./api";
-function Thumbnail({ url, frame }: { url: string; frame: number }) {
+export function Thumbnail({ url, frame }: { url: string; frame: number }) {
   const [src, setSrc] = useState<string>();
   const [failed, setFailed] = useState(false);
   useEffect(() => {

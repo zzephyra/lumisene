@@ -26,6 +26,10 @@ class QiniuObjectStorage:
         url = await self.signed_download_url(object_key=object_key)
         return await asyncio.to_thread(_download, url)
 
+    async def get_prefix(self, *, object_key: str, max_bytes: int) -> bytes:
+        url = await self.signed_download_url(object_key=object_key)
+        return await asyncio.to_thread(_download, url, max_bytes)
+
     async def delete_object(self, *, object_key: str) -> None:
         await asyncio.to_thread(self._provider.delete, object_key)
 
@@ -43,7 +47,7 @@ def build_object_storage(settings: Settings):
     return S3Storage(settings)
 
 
-def _download(url: str) -> bytes:
+def _download(url: str, max_bytes: int | None = None) -> bytes:
     import ipaddress
     import urllib.request
     from urllib.parse import urlsplit
@@ -60,6 +64,7 @@ def _download(url: str) -> bytes:
         address = None
     if address is not None and (address.is_private or address.is_loopback or address.is_link_local):
         raise RuntimeError("object storage request failed")
-    request = urllib.request.Request(url, method="GET")
+    headers = {"Range": f"bytes=0-{max_bytes - 1}"} if max_bytes else {}
+    request = urllib.request.Request(url, headers=headers, method="GET")
     with urllib.request.urlopen(request, timeout=30) as response:
-        return response.read()
+        return response.read(max_bytes) if max_bytes else response.read()

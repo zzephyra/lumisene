@@ -36,7 +36,9 @@ class TextCompletionService:
     ) -> None:
         self.settings = settings
         self.session_factory = session_factory
-        self.client = client or OpenAICompatibleChat()
+        self.client = client or OpenAICompatibleChat(
+            timeout_seconds=settings.text_completion_timeout_seconds
+        )
 
     async def submit(
         self,
@@ -45,6 +47,7 @@ class TextCompletionService:
         project_id: UUID,
         actor_id: UUID,
         prompt: str,
+        commit: bool = True,
     ) -> TextCompletion:
         cleaned = _clean_prompt(prompt)
         config = await require_assigned(uow.session, "text_generation")
@@ -64,7 +67,8 @@ class TextCompletionService:
         )
         uow.session.add(row)
         await uow.session.flush()
-        await uow.commit()
+        if commit:
+            await uow.commit()
         logger.info("text_completion_queued", completion_id=str(row.id), project_id=str(project_id))
         return row
 

@@ -55,3 +55,12 @@ describe("AccountMenu", () => {
     expect(screen.getByRole("menuitem", { name: "退出登录" })).toBeInTheDocument();
   });
 });
+
+it("普通用户的账户菜单不显示管理员入口", async () => {
+  vi.mocked(getMe).mockResolvedValue({ id: "member", email: "member@example.com", platform_admin: false });
+  const user = userEvent.setup();
+  renderMenu();
+  await user.click(await screen.findByRole("button", { name: "账户菜单" }));
+  expect(screen.queryByRole("menuitem", { name: "模型目录" })).not.toBeInTheDocument();
+  expect(screen.getByRole("menuitem", { name: "退出登录" })).toBeInTheDocument();
+});

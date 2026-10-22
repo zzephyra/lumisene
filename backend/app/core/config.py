@@ -128,6 +128,7 @@ class Settings(BaseSettings):
     log_service: str = ""
     database_url: str = "postgresql+asyncpg://fluxora:fluxora@localhost:5432/fluxora"
     database_connect_timeout_seconds: float = 5.0
+    text_completion_timeout_seconds: float = Field(default=300.0, ge=60, le=600)
     session_ttl_seconds: int = Field(default=7 * 24 * 60 * 60, gt=0)
     # The API contract requires a short-lived pre-auth CSRF token but does not
     # fix the duration. Ten minutes matches the upload credential TTL.

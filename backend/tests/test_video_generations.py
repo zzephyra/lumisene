@@ -315,3 +315,28 @@ async def _run_worker(
             await service.poll(task_id)
     finally:
         await engine.dispose()
+
+
+def test_china_legacy_wire_model_name_and_duration():
+    captured = []
+
+    def post(url, key, payload, headers, timeout):
+        captured.append(payload)
+        return 200, {"output": {"task_id": "safe-task", "task_status": "PENDING"}}
+
+    adapter = DashScopeVideo(post=post)
+    asyncio.run(
+        adapter.submit(
+            base_url="https://workspace.cn-beijing.maas.aliyuncs.com",
+            api_key="test",
+            model="wan2.1-i2v-turbo",
+            prompt="scene",
+            size=None,
+            duration=4,
+            image=b"png",
+            resolution="720P",
+        )
+    )
+    assert captured[0]["model"] == "wanx2.1-i2v-turbo"
+    assert captured[0]["parameters"]["duration"] == 4
+    assert "img_url" in captured[0]["input"]

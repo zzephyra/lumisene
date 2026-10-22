@@ -20,6 +20,7 @@ from app.api.security import no_store
 from app.core.config import get_settings
 from app.core.errors import ValidationError
 from app.infrastructure.db.session import UnitOfWork
+from app.infrastructure.storage.objects import QiniuObjectStorage
 from app.infrastructure.storage.s3 import S3Storage
 from app.modules.generation.deletion import AssetDeletionService
 from app.modules.generation.models import Asset, GenerationTask
@@ -177,15 +178,22 @@ async def serve_asset_content(
     object_key = asset.object_key
     mime = asset.mime
     provider = asset.storage_provider
+    kind = asset.kind
     await uow.commit()
-    if provider == "qiniu":
-        signer = getattr(generations.storage, "signed_download_url", None)
+    storage = generations.storage
+    # Image editing reads pixels with fetch. A redirect to Qiniu is cross-origin and
+    # cannot be read, while an <img> can still follow it. Return image bytes directly.
+    if provider == "qiniu" and kind != "IMAGE":
+        signer = getattr(storage, "signed_download_url", None)
         if signer is None:
             raise ValidationError("作品存储未配置签名访问")
         url = await signer(object_key=object_key)
-        return RedirectResponse(url, status_code=302, headers={"Cache-Control": "private, no-store"})
-    storage = generations.storage
-    if provider == "s3" and getattr(generations.storage, "provider_name", None) == "qiniu":
+        return RedirectResponse(
+            url, status_code=302, headers={"Cache-Control": "private, no-store"}
+        )
+    if provider == "qiniu" and getattr(storage, "provider_name", None) != "qiniu":
+        storage = QiniuObjectStorage(get_settings())
+    elif provider == "s3" and getattr(storage, "provider_name", None) == "qiniu":
         storage = S3Storage(get_settings())
     content = await storage.get_object(object_key=object_key)
     headers = {"Cache-Control": "no-store", "Accept-Ranges": "bytes"}
@@ -283,7 +291,9 @@ async def read_asset_deletion(
         asset_id=asset.id,
         deleted_at=asset.deleted_at,
         policy="delete_cloud_file" if asset.purge_status else "retain_cloud_file",
-        purge_status=asset.purge_status if asset.purge_status in {"pending", "failed", "purged"} else None,
+        purge_status=asset.purge_status
+        if asset.purge_status in {"pending", "failed", "purged"}
+        else None,
     )
 
 

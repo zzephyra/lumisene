@@ -1,68 +1,260 @@
-# Overlay on docker-compose.yml; requires Docker Compose >= 2.24.4.
-# No source mounts or builds: every application service uses the CI artifact.
+# Lumisene production Compose (retains all 10 original services).
+# Run: docker compose --env-file .env.prod -f compose.prod.yaml up -d --build
 services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fluxora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}
+      POSTGRES_DB: ${POSTGRES_DB:-fluxora}
+    volumes:
+    - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command:
+    - redis-server
+    - --appendonly
+    - 'yes'
+    volumes:
+    - redis_data:/data
+    healthcheck:
+      test:
+      - CMD
+      - redis-cli
+      - ping
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
+    volumes:
+    - elasticsearch_data:/usr/share/elasticsearch/data
+  minio:
+    image: ghcr.io/coollabsio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-fluxora}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.prod}
+    volumes:
+    - minio_data:/data
   api:
-    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-backend:${IMAGE_TAG:?IMAGE_TAG is required}
-    build: !reset null
-    volumes: !override
-      - type: bind
-        source: ./backend/model-endpoints.yaml
-        target: /app/model-endpoints.yaml
-        read_only: true
-        bind:
-          create_host_path: false
-      - ./config/system-defaults.json:/config/system-defaults.json:ro
-      - ./logs:/var/log/fluxora
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    image: ${BACKEND_IMAGE:-ghcr.io/zzephyra/lumisene-backend:latest}
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-fluxora}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fluxora}
+      DATABASE_CONNECT_TIMEOUT_SECONDS: '5'
+      MODEL_SECRET_REFS: qianwen,local_model_secret,wan_video
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: fluxora
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-fluxora}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.prod}
+      REDIS_URL: redis://redis:6379/0
+      SYSTEM_DEFAULTS_FILE: /config/system-defaults.json
+      LOG_DIR: /var/log/fluxora
+      LOG_SERVICE: api
+      MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
+    env_file:
+    - path: .env.prod
+      required: true
+    ports:
+    - 127.0.0.1:8000:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+    - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
+    - ./config/system-defaults.json:/config/system-defaults.json:ro
+    - ./logs:/var/log/fluxora
+    command:
+    - sh
+    - -c
+    - alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
   text-worker:
-    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-backend:${IMAGE_TAG:?IMAGE_TAG is required}
-    build: !reset null
-    volumes: !override
-      - type: bind
-        source: ./backend/model-endpoints.yaml
-        target: /app/model-endpoints.yaml
-        read_only: true
-        bind:
-          create_host_path: false
-      - ./config/system-defaults.json:/config/system-defaults.json:ro
-      - ./logs:/var/log/fluxora
+    image: ${BACKEND_IMAGE:-ghcr.io/zzephyra/lumisene-backend:latest}
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-fluxora}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fluxora}
+      DATABASE_CONNECT_TIMEOUT_SECONDS: '5'
+      MODEL_SECRET_REFS: qianwen,local_model_secret,wan_video
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: fluxora
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-fluxora}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.prod}
+      LOG_DIR: /var/log/fluxora
+      LOG_SERVICE: text-worker
+      MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
+    env_file:
+    - path: .env.prod
+      required: true
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+    - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
+    - ./logs:/var/log/fluxora
+    command:
+    - python
+    - -m
+    - app.workers.text_completion
   image-worker:
-    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-backend:${IMAGE_TAG:?IMAGE_TAG is required}
-    build: !reset null
-    volumes: !override
-      - type: bind
-        source: ./backend/model-endpoints.yaml
-        target: /app/model-endpoints.yaml
-        read_only: true
-        bind:
-          create_host_path: false
-      - ./config/system-defaults.json:/config/system-defaults.json:ro
-      - ./logs:/var/log/fluxora
+    image: ${BACKEND_IMAGE:-ghcr.io/zzephyra/lumisene-backend:latest}
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-fluxora}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fluxora}
+      DATABASE_CONNECT_TIMEOUT_SECONDS: '5'
+      MODEL_SECRET_REFS: qianwen,local_model_secret,wan_video
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: fluxora
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-fluxora}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.prod}
+      REDIS_URL: redis://redis:6379/0
+      SYSTEM_DEFAULTS_FILE: /config/system-defaults.json
+      LOG_DIR: /var/log/fluxora
+      LOG_SERVICE: image-worker
+      MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
+    env_file:
+    - path: .env.prod
+      required: true
+    depends_on:
+      api:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      redis:
+        condition: service_started
+    volumes:
+    - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
+    - ./config/system-defaults.json:/config/system-defaults.json:ro
+    - ./logs:/var/log/fluxora
+    command:
+    - python
+    - -m
+    - app.workers.image_generation
   video-worker:
-    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-backend:${IMAGE_TAG:?IMAGE_TAG is required}
-    build: !reset null
-    volumes: !override
-      - type: bind
-        source: ./backend/model-endpoints.yaml
-        target: /app/model-endpoints.yaml
-        read_only: true
-        bind:
-          create_host_path: false
-      - ./config/system-defaults.json:/config/system-defaults.json:ro
-      - ./logs:/var/log/fluxora
+    image: ${BACKEND_IMAGE:-ghcr.io/zzephyra/lumisene-backend:latest}
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-fluxora}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fluxora}
+      DATABASE_CONNECT_TIMEOUT_SECONDS: '5'
+      MODEL_SECRET_REFS: qianwen,local_model_secret,wan_video
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: fluxora
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-fluxora}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.prod}
+      REDIS_URL: redis://redis:6379/0
+      SYSTEM_DEFAULTS_FILE: /config/system-defaults.json
+      LOG_DIR: /var/log/fluxora
+      LOG_SERVICE: video-worker
+      MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
+    env_file:
+    - path: .env.prod
+      required: true
+    depends_on:
+      api:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      redis:
+        condition: service_started
+    volumes:
+    - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
+    - ./config/system-defaults.json:/config/system-defaults.json:ro
+    - ./logs:/var/log/fluxora
+    command:
+    - python
+    - -m
+    - app.workers.video_generation
   editor-worker:
-    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-backend:${IMAGE_TAG:?IMAGE_TAG is required}
-    build: !reset null
-    volumes: !override
-      - type: bind
-        source: ./backend/model-endpoints.yaml
-        target: /app/model-endpoints.yaml
-        read_only: true
-        bind:
-          create_host_path: false
-      - ./config/system-defaults.json:/config/system-defaults.json:ro
-      - ./logs:/var/log/fluxora
+    image: ${BACKEND_IMAGE:-ghcr.io/zzephyra/lumisene-backend:latest}
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-fluxora}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fluxora}
+      DATABASE_CONNECT_TIMEOUT_SECONDS: '5'
+      MODEL_SECRET_REFS: qianwen,local_model_secret,wan_video
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: fluxora
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-fluxora}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.prod}
+      LOG_DIR: /var/log/fluxora
+      LOG_SERVICE: editor-worker
+      MODEL_ENDPOINTS_FILE: /app/model-endpoints.yaml
+    env_file:
+    - path: .env.prod
+      required: true
+    depends_on:
+      api:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    volumes:
+    - ./backend/model-endpoints.yaml:/app/model-endpoints.yaml:ro
+    - ./logs:/var/log/fluxora
+    command:
+    - python
+    - -m
+    - app.workers.editor_render
   frontend:
-    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-frontend:${IMAGE_TAG:?IMAGE_TAG is required}
-    build: !reset null
-    volumes: !reset []
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    pull_policy: build
+    restart: unless-stopped
+    ports:
+    - 127.0.0.1:5173:80
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - wget -q --spider http://127.0.0.1/ || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 5
+volumes:
+  elasticsearch_data: null
+  minio_data: null
+  postgres_data: null
+  redis_data: null

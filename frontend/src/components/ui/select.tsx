@@ -16,7 +16,9 @@ export function Select({
   options,
   disabled = false,
   placeholder = "请选择",
+  label,
   className,
+  side = "bottom",
 }: {
   id: string;
   value: string;
@@ -24,7 +26,9 @@ export function Select({
   options: SelectOption[];
   disabled?: boolean;
   placeholder?: string;
+  label?: string;
   className?: string;
+  side?: "top" | "bottom";
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [menuWidth, setMenuWidth] = useState<number>();
@@ -46,6 +50,7 @@ export function Select({
             "flex h-10 w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-line bg-canvas px-3 text-left text-sm text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-pointer disabled:opacity-60",
             className,
           )}
+          aria-label={label}
           disabled={unavailable}
           id={id}
           type="button"
@@ -56,8 +61,9 @@ export function Select({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
-        className="z-40 max-h-72 overflow-y-auto p-1.5"
-        style={menuWidth ? { width: menuWidth } : undefined}
+        className="z-[80] max-h-72 w-max max-w-80 overflow-y-auto p-1.5"
+        side={side}
+        style={menuWidth ? { minWidth: menuWidth, zIndex: 80 } : { zIndex: 80 }}
       >
         {options.map((option) => {
           const active = option.value === value;

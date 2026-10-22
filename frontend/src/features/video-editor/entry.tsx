@@ -36,6 +36,7 @@ export function EditVideoButton({
         composition: {
           schema_version: 1,
           fps: 30,
+          frame: "fit",
           width,
           height,
           duration_in_frames: media.frames,

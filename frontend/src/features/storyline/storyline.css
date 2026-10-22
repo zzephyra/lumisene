@@ -1,0 +1,285 @@
+.plot-page {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: clamp(16px, 3vw, 40px);
+  color: var(--color-ink);
+}
+.plot-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+}
+.plot-heading h2 {
+  font-size: 24px;
+  font-weight: 600;
+}
+.plot-heading p,
+.plot-empty p {
+  color: var(--color-muted);
+  margin-top: 8px;
+}
+.plot-actions,
+.plot-add-block,
+.plot-ai-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.plot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 20px;
+}
+.plot-card {
+  border: 1px solid var(--color-line);
+  border-radius: 16px;
+  padding: 20px;
+  background: var(--color-panel);
+  transition: border-color 0.15s;
+}
+.plot-card:hover {
+  border-color: var(--color-muted);
+}
+.plot-card.is-dragging {
+  opacity: 0.4;
+}
+.plot-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-muted);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+.plot-card-top span {
+  flex: 1;
+}
+.plot-drag {
+  cursor: grab;
+  padding: 8px;
+}
+.plot-card-open {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  padding: 16px 0;
+}
+.plot-card h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.plot-summary {
+  color: var(--color-muted);
+  font-size: 14px;
+  line-height: 1.7;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 72px;
+}
+.plot-card footer {
+  display: flex;
+  justify-content: space-between;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+.plot-scenes {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 1000px;
+  margin: auto;
+}
+.plot-empty {
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+}
+.plot-empty h3 {
+  font-size: 22px;
+}
+.plot-dialog {
+  max-width: 720px;
+  max-height: 85svh;
+  overflow: auto;
+  color-scheme: dark;
+}
+.plot-form {
+  display: grid;
+  gap: 18px;
+  margin-top: 24px;
+}
+.plot-page input:not([type="checkbox"]),
+.plot-page textarea,
+.plot-dialog input,
+.plot-dialog textarea {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  background: var(--color-canvas);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--color-ink);
+  margin: 6px 0;
+}
+.plot-page textarea,
+.plot-dialog textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+.plot-dialog input:focus,
+.plot-dialog textarea:focus {
+  border-color: var(--color-line);
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.plot-error {
+  border: 1px solid var(--color-line);
+  padding: 12px;
+  margin-bottom: 16px;
+  color: var(--color-ink);
+}
+.plot-editor {
+  max-width: 1200px;
+  margin: auto;
+}
+.plot-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 30px;
+}
+.plot-editor-layout aside {
+  border-left: 1px solid var(--color-line);
+  padding-left: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.plot-editor-layout h3 {
+  font-weight: 600;
+  margin-top: 16px;
+}
+.plot-page .plot-title-input {
+  font-size: 24px;
+  border: 0;
+  background: transparent;
+  margin-bottom: 20px;
+}
+.plot-block {
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 14px;
+  margin: 12px 0;
+}
+.plot-block:hover,
+.plot-block.is-selected {
+  border-color: var(--color-line);
+}
+.plot-block-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.plot-block-head > button:first-child {
+  max-width: 140px;
+}
+.plot-block textarea {
+  background: transparent;
+  border: none;
+  line-height: 1.9;
+}
+.plot-person {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.plot-person img {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.plot-jobs {
+  border-top: 1px solid var(--color-line);
+  margin-top: 32px;
+  padding-top: 20px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.plot-jobs h3 {
+  font-size: 14px;
+  color: var(--color-muted);
+}
+.plot-preview {
+  display: grid;
+  gap: 16px;
+  margin-top: 20px;
+}
+.plot-preview section {
+  border-bottom: 1px solid var(--color-line);
+  padding-bottom: 16px;
+}
+.plot-pulse {
+  height: 8px;
+  width: 8px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  animation: plot-pulse 1.5s ease-in-out infinite;
+}
+@keyframes plot-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plot-pulse {
+    animation: none;
+  }
+}
+@media (max-width: 760px) {
+  .plot-editor-layout {
+    grid-template-columns: 1fr;
+  }
+  .plot-editor-layout aside {
+    border-left: 0;
+    border-top: 1px solid var(--color-line);
+    padding: 16px 0;
+  }
+  .plot-block-head {
+    flex-wrap: wrap;
+  }
+  .plot-heading {
+    align-items: flex-start;
+  }
+  .plot-card {
+    padding: 16px;
+  }
+}
+.plot-info-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.plot-editor-layout summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin: 12px 0;
+}
+.plot-scene-people {
+  font-size: 13px;
+  color: var(--color-muted);
+  margin: 4px 0 16px;
+}

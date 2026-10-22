@@ -12,8 +12,17 @@ from app.infrastructure.ai.models import (
 from app.infrastructure.ai.skills import Skill, SkillRevision
 from app.infrastructure.db.base import Base
 from app.infrastructure.outbox.models import OutboxEvent
-from app.modules.chat.models import Conversation, ChatTurn
 from app.modules.auth.models import User, UserAdminAudit, UserSession
+from app.modules.characters.models import (
+    AnalysisJob,
+    Character,
+    CharacterRelationship,
+    ExtractionEvidence,
+    GraphLayout,
+    ScriptDocument,
+    ScriptSegment,
+)
+from app.modules.chat.models import ChatTurn, Conversation
 from app.modules.editor.models import EditorAdminAudit, EditorDocument, EditorRender
 from app.modules.generation.models import (
     Asset,
@@ -22,13 +31,17 @@ from app.modules.generation.models import (
     GenerationOutput,
     GenerationTask,
 )
+from app.modules.production import models as production_models  # noqa: F401
+from app.modules.projects.models import Project, ProjectMember
 from app.modules.settings.models import (
     SystemSetting,
     SystemSettingAudit,
     SystemSettingInitialization,
     SystemSettingPublication,
 )
-from app.modules.projects.models import Project, ProjectMember
+from app.modules.stories.models import Story
+from app.modules.story_assets.models import StoryAssetLink
+from app.modules.storyline.models import Chapter, PlotJob, PlotState, Scene  # noqa: F401
 from app.modules.uploads.models import UploadFile
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -40,6 +53,11 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 registered_tables = {
+    ScriptDocument.__tablename__,
+    ScriptSegment.__tablename__,
+    AnalysisJob.__tablename__,
+    ExtractionEvidence.__tablename__,
+    Character.__tablename__, CharacterRelationship.__tablename__, GraphLayout.__tablename__,
     Conversation.__tablename__, ChatTurn.__tablename__,
     Skill.__tablename__, SkillRevision.__tablename__,
     EditorDocument.__tablename__,
@@ -65,6 +83,8 @@ registered_tables = {
     GenerationTask.__tablename__,
     GenerationOutput.__tablename__,
     UploadFile.__tablename__,
+    Story.__tablename__,
+    StoryAssetLink.__tablename__,
 }
 missing_tables = registered_tables.difference(target_metadata.tables)
 if missing_tables:

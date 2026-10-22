@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 from app.api.deps import get_image_generation_service
 from app.infrastructure.db.session import UnitOfWork, create_db_engine, create_session_factory
-from app.infrastructure.media.render import command, probe, render
+from app.infrastructure.media.render import command, frame_filter, probe, render
 from app.modules.editor.schemas import Composition
 from app.modules.editor.service import EditorService
 from app.modules.generation.service import ImageGenerationService
@@ -44,6 +44,16 @@ def composition(asset_id=None):
             }
         ],
     }
+
+
+def test_fill_covers_canvas_and_fit_pads():
+    fill = frame_filter(1080, 1920, 30, 0, 150, "fill")
+    fit = frame_filter(1080, 1920, 30, 0, 150, "fit")
+    assert "force_original_aspect_ratio=increase" in fill
+    assert "crop=1080:1920" in fill
+    assert "pad=" not in fill
+    assert "force_original_aspect_ratio=decrease" in fit
+    assert "pad=1080:1920" in fit
 
 
 def test_schema_rejects_overlap_and_source_overrun():

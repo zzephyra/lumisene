@@ -7,10 +7,16 @@ from app.core.logging import configure_logging, get_logger
 from app.infrastructure.db.session import UnitOfWork, create_db_engine, create_session_factory
 from app.infrastructure.storage.objects import build_object_storage
 from app.infrastructure.storage.s3 import S3Storage
+from app.modules.auth.service import AuthService
+from app.modules.characters.images import CharacterImagesService
+from app.modules.characters.service import CharacterService
 from app.modules.generation.deletion import process_purge_jobs
 from app.modules.generation.inputs import GenerationInputService
 from app.modules.generation.service import ImageGenerationService
+from app.modules.projects.service import ProjectService
 from app.modules.settings.service import SettingsService
+from app.modules.stories.service import StoryService
+from app.modules.uploads.service import UploadService
 
 logger = get_logger(__name__)
 
@@ -26,6 +32,10 @@ async def _run() -> None:
     async with session_factory() as session:
         await SettingsService(settings).initialize(session)
     service = ImageGenerationService(settings, session_factory=session_factory, storage=storage)
+    projects = ProjectService(AuthService(settings))
+    character_images = CharacterImagesService(
+        CharacterService(projects, StoryService(projects, UploadService(settings))), service
+    )
     logger.info("image_generation_worker_started")
     cleanup_at = 0.0
     try:
@@ -40,6 +50,10 @@ async def _run() -> None:
                 cleanup_at = now + 3600
 
             await service.recover_persisted()
+            try:
+                await character_images.collect(session_factory)
+            except Exception as exc:
+                logger.warning("character_image_collection_failed", error_type=type(exc).__name__)
             await process_purge_jobs(session_factory, settings)
             async with session_factory() as session:
                 await SettingsService(settings).publish_pending(session)

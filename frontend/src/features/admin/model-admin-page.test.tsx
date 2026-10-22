@@ -492,7 +492,7 @@ describe("model admin page", () => {
   it("shows a skeleton while loading and a retry after failure", async () => {
     vi.mocked(listModelConfigs).mockReturnValue(new Promise(() => {}));
     renderPage();
-    expect(screen.getByRole("status", { name: "正在加载模型目录" })).toBeInTheDocument();
+    expect(await screen.findByRole("status", { name: "正在加载模型目录" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "登记模型" })).not.toBeInTheDocument();
   });
 

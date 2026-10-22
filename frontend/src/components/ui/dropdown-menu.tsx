@@ -25,6 +25,14 @@ export function DropdownMenuContent({
   );
 }
 
+export function DropdownMenuLabel({ className, ...props }: ComponentProps<typeof DropdownMenuPrimitive.Label>) {
+  return <DropdownMenuPrimitive.Label className={cn("px-2 py-1 text-[11px] text-muted", className)} {...props} />;
+}
+
+export function DropdownMenuSeparator({ className, ...props }: ComponentProps<typeof DropdownMenuPrimitive.Separator>) {
+  return <DropdownMenuPrimitive.Separator className={cn("my-1 h-px bg-line", className)} {...props} />;
+}
+
 export function DropdownMenuItem({
   className,
   ...props

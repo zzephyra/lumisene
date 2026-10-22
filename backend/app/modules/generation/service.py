@@ -322,6 +322,30 @@ class ImageGenerationService:
             raise NotFoundError("Asset was not found")
         return asset
 
+    async def lock_asset_for_reference(
+        self, uow: UnitOfWork, *, project_id: UUID, asset_id: UUID
+    ) -> Asset:
+        asset = await uow.session.scalar(
+            select(Asset)
+            .where(Asset.id == asset_id, Asset.project_id == project_id, Asset.status == "ready")
+            .with_for_update()
+        )
+        if asset is None:
+            raise NotFoundError("Asset was not found")
+        return asset
+
+    async def reference_image_bytes(self, uow, *, project_id, asset_id):
+        """Authorized callers supply a project-scoped asset, never a remote URL."""
+        from app.infrastructure.storage.objects import S3Storage
+
+        asset = await self.asset_for_download(uow, project_id=project_id, asset_id=asset_id)
+        if asset.kind != "IMAGE" or asset.size_bytes > self.settings.image_max_size:
+            raise ValidationError("参考素材必须是大小限制内的图片")
+        storage = self.storage
+        if asset.storage_provider == "s3" and getattr(storage, "provider_name", None) == "qiniu":
+            storage = S3Storage(self.settings)
+        return await storage.get_object(object_key=asset.object_key)
+
     async def asset_for_member(
         self,
         uow: UnitOfWork,
@@ -337,6 +361,18 @@ class ImageGenerationService:
         if asset is None:
             raise NotFoundError("Asset was not found")
         return asset
+
+    async def project_images(self, uow, *, project_id):
+        return list(
+            await uow.session.scalars(
+                select(Asset)
+                .where(
+                    Asset.project_id == project_id, Asset.kind == "IMAGE", Asset.status == "ready"
+                )
+                .order_by(Asset.created_at.desc())
+                .limit(100)
+            )
+        )
 
     async def editor_assets(self, uow: UnitOfWork, *, project_id: UUID) -> list[Asset]:
         rows = await uow.session.execute(

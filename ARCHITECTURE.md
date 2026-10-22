@@ -175,6 +175,7 @@ frontend/src/
 | generation | 生成任务、尝试、幂等键 | 媒体字节 |
 | assets | 资源元数据和签名访问 | 业务状态机 |
 | editor | 编辑工程、不可变渲染快照、异步导出任务 | 供应商生成、其他模块的表 |
+| stories | 项目剧本名称、介绍、版本和封面引用 | 剧本原文、人物分析、生成资源字节 |
 
 Search、Storage、Model Gateway、Outbox 属于 `backend/app/infrastructure/`，不是业务模块。
 
@@ -739,3 +740,23 @@ ADR-037 取代 ADR-035 的新任务规则：扩图、局部重绘、参考图指
 用户后续授权：图片方案可在对话内点击生成并展示结果。复用现有图片生成 Service、Worker 和资产存储；chat_turns 保存任务关联，任务与关联同事务提交，重复点击返回同一任务。视频仍通过生成页。图片编辑进入既有编辑器。
 
 对话图片交互更新：用户已授权识别图片生成意图后直接生成。Worker 在新回复完成校验时，同事务创建图片任务并关联消息；历史读取不触发生成，失败仅显式重试。文字在图片容器外，生成期间复用动画骨架，工具栏位于回复底部。
+
+## 剧本人物知识图谱
+
+根据用户授权新增 characters 模块，管理人物档案、关系、剧本证据、分析任务与独立布局。人物图谱属于某一个剧本，不在项目侧栏单独出现。见 [ADR-043](docs/adr/043-story-scoped-character-graph.md)。严格版本化 JSONB 允许存储非关系人物属性，人物关系和项目外键仍使用显式列。React Flow 与 d3-force 负责图交互和布局；统一 Parser、既有对象存储及文本模型适配器支持分析。AI 建议需审核，不覆盖用户事实。见 [ADR-041](docs/adr/041-script-character-graph.md) 和 [设计规范](docs/specs/character-graph.md)。
+
+人物形象资产按 [ADR-045](docs/adr/045-character-image-library.md) 独立于文本档案持久化；复用上传、生成任务和对象存储，现有图片 Worker 负责将生成结果绑定到人物，不新增模型调用通道。
+
+ADR-046：storyline 模块管理剧本章节、场景、结构化正文和待确认 AI 草稿，复用 Story/Character Service 与现有文本 Worker。正式剧情仅人工保存或明确接受 AI 草稿后写入；不实现分镜工作台。
+
+ADR-047：story_assets 汇总当前剧本的直接素材引用和人物图集，兼容 upload_files/assets，不复制对象。跨模块只读投影经 Port，删除检查全部有效引用并遵循存储策略。首期文档开放 PDF/TXT/Markdown，分镜仅保留分类。
+
+ADR-048：用户授权 production 剧本视频工作台。版本化制作快照与原剧情分离，分镜人工确认后复用生成任务；导出复用 editor/FFmpeg。模型能力以已接入适配器与服务端配置交集为准。
+
+ADR-049：V2 本轮实施 Phase 1–4：剧本内章节范围向导、目标时长、带原文来源的规划和分镜工作区。智能/专业共享数据；Agent 自动执行、Credits、多模型覆盖和多轨后期另分阶段，尚未提供的能力不展示为已实现。
+
+### 故事内视频生成 V3
+
+依据 [ADR-050](docs/adr/050-story-video-flow.md)，对外将剧本创作容器称为故事。视频制作入口、草稿与成片归属于故事；旧制作链接按已存 story_id 映射。六步向导复用 Production 和既有异步媒体服务，执行请求在明确确认后提交，不能伪造音频能力或计费数据。
+
+视频制作主流程当前不启用点数、估价和费用确认门槛，按 [ADR-052](docs/adr/052-defer-production-billing.md) 执行；保留权限、版本、镜头确认和媒体校验。

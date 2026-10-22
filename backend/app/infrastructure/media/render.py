@@ -24,6 +24,27 @@ async def command(*args: str, timeout: int = 600) -> bytes:
     return stdout
 
 
+def frame_filter(
+    width: int,
+    height: int,
+    fps: int,
+    start: int,
+    end: int,
+    frame: str = "fit",
+) -> str:
+    """Fit keeps the whole frame and pads. Fill covers the chosen canvas."""
+    base = f"fps={fps},trim=start_frame={start}:end_frame={end},setpts=PTS-STARTPTS,"
+    if frame == "fill":
+        return (
+            base + f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},setsar=1"
+        )
+    return (
+        base + f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+    )
+
+
 async def probe(path: Path) -> dict:
     data = json.loads(
         await command(
@@ -50,6 +71,9 @@ async def probe(path: Path) -> dict:
         raise ValueError("Video duration must be between 0 and 600 seconds")
     return {
         "frames": int(duration * 30 + 0.001),
+        "duration_ms": round(duration * 1000),
+        "width": video["width"],
+        "height": video["height"],
         "audio": any(s["codec_type"] == "audio" for s in data["streams"]),
     }
 
@@ -109,10 +133,13 @@ async def render(composition: dict, inputs: dict[str, Path], directory: Path) ->
             if not info["audio"]:
                 args += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
             start, end = clip["source_start_frame"], clip["source_end_frame"]
-            vf = (
-                f"fps={fps},trim=start_frame={start}:end_frame={end},setpts=PTS-STARTPTS,"
-                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+            vf = frame_filter(
+                width,
+                height,
+                fps,
+                start,
+                end,
+                composition.get("frame", "fit"),
             )
             audio_source = "0:a" if info["audio"] else "1:a"
             audio_trim = f"atrim=start={start / fps}:end={end / fps}," if info["audio"] else ""

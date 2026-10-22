@@ -30,8 +30,11 @@ class _TransportFailure(Exception):
 
 
 class OpenAICompatibleChat:
-    def __init__(self, post: Post | None = None) -> None:
+    def __init__(
+        self, post: Post | None = None, *, timeout_seconds: float = _TIMEOUT_SECONDS
+    ) -> None:
         self._post = post or _post_json
+        self._timeout_seconds = timeout_seconds
 
     async def complete(self, *, base_url: str, api_key: str, model: str, prompt: str) -> str:
         url = base_url.rstrip("/") + "/chat/completions"
@@ -46,7 +49,7 @@ class OpenAICompatibleChat:
                 url,
                 api_key,
                 payload,
-                _TIMEOUT_SECONDS,
+                self._timeout_seconds,
             )
         except _TransportFailure as exc:
             if exc.kind == "timeout":
