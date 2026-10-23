@@ -1,5 +1,5 @@
 # Lumisene production Compose (retains all 10 original services).
-# Run: docker compose --env-file .env.prod -f compose.prod.yaml up -d --build
+# Deployment: scripts/deploy-tencent.sh IMAGE_PREFIX COMMIT_SHA REGISTRY_USER
 services:
   postgres:
     image: postgres:16
@@ -88,7 +88,7 @@ services:
     command:
     - sh
     - -c
-    - alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
+    - uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthcheck:
       test:
       - CMD
@@ -236,20 +236,18 @@ services:
     - -m
     - app.workers.editor_render
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.prod
-    pull_policy: build
+    image: ${FRONTEND_IMAGE:?Set FRONTEND_IMAGE to the CI image tagged with a commit SHA}
+    pull_policy: always
     restart: unless-stopped
     ports:
-    - 127.0.0.1:5173:80
+    - 127.0.0.1:5173:5173
     depends_on:
       api:
         condition: service_healthy
     healthcheck:
       test:
       - CMD-SHELL
-      - wget -q --spider http://127.0.0.1/ || exit 1
+      - wget -q --spider http://127.0.0.1:5173/ || exit 1
       interval: 15s
       timeout: 5s
       retries: 5
