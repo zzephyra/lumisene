@@ -116,12 +116,18 @@ async def test_invalid_generation_proposal_fails_closed():
 
 
 @pytest.mark.asyncio
-async def test_stream_exposes_reply_before_completion_without_json():
+@pytest.mark.parametrize("model", ["deepseek-flash", "qwen3.7-flash"])
+async def test_stream_exposes_reply_before_completion_without_json(model):
     updates = []
     chunks = ['{"reply":"你', '好","intent":"chat",', '"generation_prompt":null}']
 
     def respond(request):
-        assert json.loads(request.content)["stream"] is True
+        body = json.loads(request.content)
+        assert body["stream"] is True
+        assert body["model"] == model
+        if model == "qwen3.7-flash":
+            assert body["enable_thinking"] is False
+            assert body["response_format"] == {"type": "json_object"}
         events = []
         for part in chunks:
             events.append(
@@ -155,7 +161,7 @@ async def test_stream_exposes_reply_before_completion_without_json():
     result = await LangChainCreativeChat(httpx.MockTransport(respond)).converse(
         base_url="https://example.test",
         api_key="test",
-        model="deepseek-flash",
+        model=model,
         messages=[{"role": "user", "content": "你好"}],
         on_reply=collect,
     )

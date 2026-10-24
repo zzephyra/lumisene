@@ -20,6 +20,11 @@ qianwen:
       capabilities: [image_inpaint]
       inputs: [image]
       parameters: {}
+    qwen3.7-flash:
+      alias: {zh: 千问 3.7 Flash, en: Qwen 3.7 Flash}
+      capabilities: [text_generation]
+      inputs: [text]
+      parameters: {}
     qwen-plus:
       alias:
         zh: 千问 Plus

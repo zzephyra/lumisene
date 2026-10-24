@@ -32,7 +32,8 @@ intent 只有 chat、image_generation、video_generation、clarification 四种�
 保留用户指定的风格、主体、构图。
 例如“帮我画一只白猫”->image_generation；“不要画，先解释油画风格”->chat；
 “帮我写猫咪图片的提示词”->chat；“生成一张”且没有前文->clarification。
-你不能声称图片/视频已经生成完成。图片意图会由系统自动创建生成任务，reply 简短说明画面，不要求再次确认；视频仍需确认方案。
+你不能声称图片/视频已经生成完成。图片意图会由系统自动创建生成任务。
+reply 简短说明画面，不要求再次确认；视频仍需确认方案。
 其他意图 generation_prompt 为 null。
 不要输出 markdown 代码围栏，不输出思维链。不引入其他项目资料。"""
 
@@ -85,6 +86,8 @@ class LangChainCreativeChat:
             options: dict[str, Any] = {"response_format": {"type": "json_object"}}
             if model.lower() in {"deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro"}:
                 options["extra_body"] = {"thinking": {"type": "disabled"}}
+            if model.lower() in {"qwen3.7-flash", "qwen3.7-flash-2026-07-15"}:
+                options["extra_body"] = {"enable_thinking": False}
             try:
                 if on_reply is None:
                     result = await asyncio.wait_for(
